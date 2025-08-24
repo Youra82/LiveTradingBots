@@ -23,7 +23,7 @@ Backtest & Optimizer benutzen
 > ./run_genetic_optimizer.sh
 
 Cache vom Optimizer löschen:
-> ./monitor_bot.sh clear-cache
+> ./run_genetic_optimizer.sh clear-cache
 
 Abfrage der letzten Trading-Entscheidungen:
 
