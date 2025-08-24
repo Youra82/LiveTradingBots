@@ -3,6 +3,7 @@ import sys
 import json
 from datetime import datetime
 import logging
+import pandas as pd
 
 # Passe den Pfad an, um die Utilities zu finden
 PROJECT_ROOT = os.path.join(os.path.dirname(__file__), '..', '..', '..')
@@ -42,7 +43,7 @@ tracker_file = os.path.join(os.path.dirname(__file__), f"tracker_{params['symbol
 # --- Tracker-Funktionen ---
 if not os.path.exists(tracker_file):
     with open(tracker_file, 'w') as file:
-        json.dump({"status": "ok_to_trade", "last_side": None, "stop_loss_ids": []}, file)
+        json.dump({"status": "ok_to_trade", "last_side": None}, file)
 
 def read_tracker_file(file_path):
     with open(file_path, 'r') as file:
@@ -55,21 +56,16 @@ def update_tracker_file(file_path, data):
 def main():
     try:
         # --- BEREINIGUNG & DATENLADEN ---
-        logger.info("Storniere alte Orders...")
+        logger.info("Storniere alte Limit-Orders...")
         orders = bitget.fetch_open_orders(params['symbol'])
-        for order in orders: bitget.cancel_order(order['id'], params['symbol'])
-        
-        trigger_orders = bitget.fetch_open_trigger_orders(params['symbol'])
-        long_orders_left, short_orders_left = 0, 0
-        for order in trigger_orders:
-            if order['side'] == 'buy': long_orders_left += 1
-            elif order['side'] == 'sell': short_orders_left += 1
-            bitget.cancel_trigger_order(order['id'], params['symbol'])
-        logger.info(f"Orders storniert. Verbleibende Trigger: {long_orders_left} Longs, {short_orders_left} Shorts")
+        for order in orders: 
+            bitget.cancel_order(order['id'], params['symbol'])
 
         logger.info("Lade Marktdaten...")
-        data = bitget.fetch_recent_ohlcv(params['symbol'], params['timeframe'], 100).iloc[:-1]
+        data = bitget.fetch_recent_ohlcv(params['symbol'], params['timeframe'], 200)
+        
         data = calculate_envelope_indicators(data, params)
+        latest_complete_candle = data.iloc[-2]
         logger.info("Indikatoren berechnet.")
 
         # --- POSITIONS- & STATUS-CHECKS ---
@@ -78,15 +74,15 @@ def main():
         open_position = positions[0] if positions else None
 
         if open_position is None and tracker_info['status'] != "ok_to_trade":
-            last_price = data['close'].iloc[-1]
-            resume_price = data['average'].iloc[-1]
-            if ('long' == tracker_info['last_side'] and last_price >= resume_price) or \
-               ('short' == tracker_info['last_side'] and last_price <= resume_price):
+            last_price = latest_complete_candle['close']
+            resume_price = latest_complete_candle['average']
+            if ('long' in tracker_info.get('last_side', '') and last_price >= resume_price) or \
+               ('short' in tracker_info.get('last_side', '') and last_price <= resume_price):
                 logger.info(f"Status wird auf 'ok_to_trade' zurückgesetzt.")
-                update_tracker_file(tracker_file, {"status": "ok_to_trade", "last_side": tracker_info['last_side']})
+                update_tracker_file(tracker_file, {"status": "ok_to_trade", "last_side": tracker_info.get('last_side')})
                 tracker_info['status'] = "ok_to_trade"
             else:
-                logger.info(f"Status ist weiterhin '{tracker_info['status']}'. Warte auf Rückkehr zum Mittelwert.")
+                logger.info(f"Status ist '{tracker_info['status']}'. Warte auf Rückkehr zum Mittelwert.")
                 return
 
         # --- TRADING LOGIK ---
@@ -97,49 +93,53 @@ def main():
             amount = open_position['contracts']
             avg_entry = float(open_position['entryPrice'])
             
+            trigger_orders = bitget.fetch_open_trigger_orders(params['symbol'])
+            for order in trigger_orders:
+                bitget.cancel_trigger_order(order['id'], params['symbol'])
+            
             sl_price = avg_entry * (1 - params['stop_loss_pct']/100) if side == 'long' else avg_entry * (1 + params['stop_loss_pct']/100)
-            tp_price = data['average'].iloc[-1]
+            tp_price = latest_complete_candle['average']
 
             bitget.place_trigger_market_order(params['symbol'], close_side, amount, tp_price, reduce=True)
-            sl_order = bitget.place_trigger_market_order(params['symbol'], close_side, amount, sl_price, reduce=True)
-            update_tracker_file(tracker_file, {"status": "in_trade", "last_side": side, "stop_loss_ids": [sl_order['id']]})
+            bitget.place_trigger_market_order(params['symbol'], close_side, amount, sl_price, reduce=True)
+            update_tracker_file(tracker_file, {"status": "in_trade", "last_side": side})
             logger.info(f"TP-Order @{tp_price:.4f} und SL-Order @{sl_price:.4f} platziert/aktualisiert.")
 
         elif tracker_info['status'] == "ok_to_trade":
             logger.info("Keine Position offen, prüfe auf neue Einstiege.")
+            
+            base_leverage = params.get('base_leverage', 10)
+            target_atr_pct = params.get('target_atr_pct', 1.5)
+            max_leverage = params.get('max_leverage', 50)
+            current_atr_pct = latest_complete_candle['atr_pct']
+            
+            leverage = base_leverage
+            if pd.notna(current_atr_pct) and current_atr_pct > 0:
+                leverage = base_leverage * (target_atr_pct / current_atr_pct)
+            
+            leverage = int(round(max(1.0, min(leverage, max_leverage))))
+            
+            logger.info(f"Aktueller ATR: {current_atr_pct:.2f}%. Ziel-ATR: {target_atr_pct}%. Berechneter Hebel: {leverage}x")
+
             bitget.set_margin_mode(params['symbol'], margin_mode=params['margin_mode'])
-            bitget.set_leverage(params['symbol'], leverage=params['leverage'])
+            bitget.set_leverage(params['symbol'], leverage=leverage)
             
-            balance = params['balance_fraction_pct']/100 * params['leverage'] * bitget.fetch_balance()['USDT']['total']
-            amount_per_grid = balance / len(params['envelopes'])
+            balance = params['balance_fraction_pct']/100 * bitget.fetch_balance()['USDT']['total']
+            amount_per_grid = (balance * leverage) / len(params['envelopes_pct'])
             
-            info_update = {"status": "ok_to_trade", "last_side": tracker_info['last_side'], "stop_loss_ids": []}
-
-            # LONG ORDERS
-            if params['use_longs']:
+            if params.get('use_longs', True):
                 for i, e_pct in enumerate(params['envelopes_pct']):
-                    entry_price = data[f'band_low_{i + 1}'].iloc[-1]
+                    entry_price = latest_complete_candle[f'band_low_{i + 1}']
                     amount = amount_per_grid / entry_price
-                    sl_price = entry_price * (1 - params['stop_loss_pct']/100)
-                    
                     bitget.place_limit_order(params['symbol'], 'buy', amount, entry_price)
-                    sl_order = bitget.place_trigger_market_order(params['symbol'], 'sell', amount, sl_price, reduce=True)
-                    info_update["stop_loss_ids"].append(sl_order['id'])
-                    logger.info(f"Platziere Long-Grid {i+1}: Entry @{entry_price:.4f}, SL @{sl_price:.4f}")
+                    logger.info(f"Platziere Long-Grid {i+1}: Entry @{entry_price:.4f}")
 
-            # SHORT ORDERS
-            if params['use_shorts']:
+            if params.get('use_shorts', True):
                 for i, e_pct in enumerate(params['envelopes_pct']):
-                    entry_price = data[f'band_high_{i + 1}'].iloc[-1]
+                    entry_price = latest_complete_candle[f'band_high_{i + 1}']
                     amount = amount_per_grid / entry_price
-                    sl_price = entry_price * (1 + params['stop_loss_pct']/100)
-                    
                     bitget.place_limit_order(params['symbol'], 'sell', amount, entry_price)
-                    sl_order = bitget.place_trigger_market_order(params['symbol'], 'buy', amount, sl_price, reduce=True)
-                    info_update["stop_loss_ids"].append(sl_order['id'])
-                    logger.info(f"Platziere Short-Grid {i+1}: Entry @{entry_price:.4f}, SL @{sl_price:.4f}")
-            
-            update_tracker_file(tracker_file, info_update)
+                    logger.info(f"Platziere Short-Grid {i+1}: Entry @{entry_price:.4f}")
 
     except Exception as e:
         logger.error(f"Ein unerwarteter Fehler ist aufgetreten: {e}", exc_info=True)
