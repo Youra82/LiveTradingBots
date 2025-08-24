@@ -19,6 +19,7 @@ Monitorabfrage:
 
 Backtest & Optimizer benutzen
 > ./monitor_bot.sh optimize
+
 > ./run_genetic_optimizer.sh
 
 Cache vom Optimizer löschen:
