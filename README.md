@@ -5,8 +5,30 @@ _A homemade humble library to run automated python crypto trading bots_
 \
 🛠️ Setup commands (virtual environment included)
 -------------
-> git clone https://github.com/RobotTraders/LiveTradingBots.git \
-> bash LiveTradingBots/install.sh
+> git clone https://github.com/Youra82/LiveTradingBots.git \
+> bash stbot/install.sh
+
+Botausführung:
+> bash LiveTradingBots/code/run_envelope.sh
+
+Monitorinstallation:
+> chmod +x monitor_bot.sh
+
+Monitorabfrage:
+> ./monitor_bot.sh
+
+Backtest & Optimizer benutzen
+> ./monitor_bot.sh optimize
+
+Cache vom Optimizer löschen:
+> ./monitor_bot.sh clear-cache
+
+Abfrage der letzten Trading-Entscheidungen:
+
+> grep "TRADE_DECISION:" /home/ubuntu/LiveTradingBots/logs/envelope.log | tail -n 20
+
+Crontab -e jobs ansehen:
+> grep CRON /var/log/syslog | tail -n 20
 
 
 \
