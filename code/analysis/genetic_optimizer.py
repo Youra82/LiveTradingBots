@@ -155,12 +155,12 @@ def main(num_generations):
 if __name__ == "__main__":
     
     print("\n--- Testumgebung definieren ---")
-    symbol_input = get_validated_input("Handelspaar eingeben (z.B. BTC, ETH): ", str)
-    timeframe_input = get_validated_input("Zeitfenster eingeben (einzeln oder mit Leerzeichen getrennt, z.B. 1h 4h): ", str)
+    symbol_input = get_validated_input("Handelspaar(e) eingeben (z.B. BTC ETH): ", str)
+    timeframe_input = get_validated_input("Zeitfenster eingeben (z.B. 1h 4h): ", str)
     start_date = get_validated_input("Startdatum eingeben (JJJJ-MM-TT): ", str)
     end_date = get_validated_input("Enddatum eingeben (JJJJ-MM-TT): ", str)
     
-    symbol = f"{symbol_input.upper()}/USDT:USDT"
+    symbols_to_run = symbol_input.split()
     timeframes_to_run = timeframe_input.split()
 
     print("\n--- Ziele und Regeln für die Optimierung festlegen ---")
@@ -175,119 +175,130 @@ if __name__ == "__main__":
     
     grand_hall_of_fame = []
 
-    for timeframe in timeframes_to_run:
-        print("\n" + "="*80)
-        print(f"=== STARTE OPTIMIERUNG FÜR TIMEFRAME: {timeframe.upper()} ===".center(80))
-        print("="*80)
+    # NEU: Äußere Schleife für die Handelspaare
+    for symbol_short in symbols_to_run:
+        symbol = f"{symbol_short.upper()}/USDT:USDT"
+        print("\n" + "#"*80)
+        print(f"####### OPTIMIERE HANDELSPAAR: {symbol.upper()} #######".center(80))
+        print("#"*80)
 
-        print(f"\nLade historische Daten für {symbol} ({timeframe}) von {start_date} bis {end_date}...")
-        HISTORICAL_DATA = load_data(symbol, timeframe, start_date, end_date)
+        # Innere Schleife für die Zeitfenster
+        for timeframe in timeframes_to_run:
+            print("\n" + "="*80)
+            print(f"=== STARTE OPTIMIERUNG FÜR TIMEFRAME: {timeframe.upper()} ===".center(80))
+            print("="*80)
 
-        if HISTORICAL_DATA is None or HISTORICAL_DATA.empty:
-            print(f"Fehler beim Laden der Daten für {timeframe}. Überspringe dieses Zeitfenster.")
-            continue
-        
-        print("Daten erfolgreich geladen.")
+            print(f"\nLade historische Daten für {symbol} ({timeframe}) von {start_date} bis {end_date}...")
+            HISTORICAL_DATA = load_data(symbol, timeframe, start_date, end_date)
 
-        print("\nFühre kurzen Benchmark zur Zeitschätzung durch...")
-        num_benchmarks = 3
-        benchmark_times = []
-        for _ in range(num_benchmarks):
-            start_b = time.time()
-            individual = toolbox.individual()
-            evaluate_fitness(individual)
-            end_b = time.time()
-            benchmark_times.append(end_b - start_b)
-        
-        if not benchmark_times or sum(benchmark_times) == 0:
-            print("Benchmark konnte nicht durchgeführt werden. Überspringe Zeitschätzung.")
-        else:
-            avg_time_per_run = sum(benchmark_times) / len(benchmark_times)
-            population_size = 100
-            total_evaluations = population_size + (ngen_input * population_size)
-            estimated_total_time = avg_time_per_run * total_evaluations
-            print(f"Durchschnittliche Berechnungszeit pro Variante: {avg_time_per_run:.3f} Sekunden.")
-            print(f"Geschätzte Gesamtdauer für ~{total_evaluations} Berechnungen: {format_time(estimated_total_time)}")
-        
-        hof_for_timeframe = main(num_generations=ngen_input)
-        
-        for champion in hof_for_timeframe:
-            grand_hall_of_fame.append({'champion': champion, 'symbol': symbol, 'timeframe': timeframe})
+            if HISTORICAL_DATA is None or HISTORICAL_DATA.empty:
+                print(f"Fehler beim Laden der Daten für {timeframe}. Überspringe dieses Zeitfenster.")
+                continue
+            
+            print("Daten erfolgreich geladen.")
+
+            print("\nFühre kurzen Benchmark zur Zeitschätzung durch...")
+            num_benchmarks = 3
+            benchmark_times = []
+            for _ in range(num_benchmarks):
+                start_b = time.time()
+                individual = toolbox.individual()
+                evaluate_fitness(individual)
+                end_b = time.time()
+                benchmark_times.append(end_b - start_b)
+            
+            if not benchmark_times or sum(benchmark_times) == 0:
+                print("Benchmark konnte nicht durchgeführt werden. Überspringe Zeitschätzung.")
+            else:
+                avg_time_per_run = sum(benchmark_times) / len(benchmark_times)
+                population_size = 100
+                total_evaluations = population_size + (ngen_input * population_size)
+                estimated_total_time = avg_time_per_run * total_evaluations
+                print(f"Durchschnittliche Berechnungszeit pro Variante: {avg_time_per_run:.3f} Sekunden.")
+                print(f"Geschätzte Gesamtdauer für ~{total_evaluations} Berechnungen: {format_time(estimated_total_time)}")
+            
+            hof_for_timeframe = main(num_generations=ngen_input)
+            
+            for champion in hof_for_timeframe:
+                grand_hall_of_fame.append({'champion': champion, 'symbol': symbol, 'timeframe': timeframe})
     
     print("\n\n" + "#"*80)
     print("##########   GLOBALE GESAMTAUSWERTUNG (TOP 10 ALLER LÄUFE)   ##########".center(80))
     print("#"*80)
     
-    sorted_hof = sorted(grand_hall_of_fame, key=lambda x: x['champion'].fitness.values[0], reverse=True)
-    
-    for i, entry in enumerate(sorted_hof[:10]):
-        champion = entry['champion']
-        symbol = entry['symbol']
-        timeframe = entry['timeframe']
+    if not grand_hall_of_fame:
+        print("Keine gültigen Ergebnisse gefunden, um eine Gesamtauswertung zu erstellen.")
+    else:
+        sorted_hof = sorted(grand_hall_of_fame, key=lambda x: x['champion'].fitness.values[0], reverse=True)
+        
+        for i, entry in enumerate(sorted_hof[:10]):
+            champion = entry['champion']
+            symbol = entry['symbol']
+            timeframe = entry['timeframe']
 
-        HISTORICAL_DATA = load_data(symbol, timeframe, start_date, end_date)
-        
-        avg_period_final = int(max(2, champion[0]))
-        sl_pct_final = round(max(0.5, champion[1]), 2)
-        base_lev_final = int(max(1, champion[2]))
-        target_atr_final = round(max(0.1, champion[3]), 2)
-        env_start_final = round(max(0.1, champion[4]), 2)
-        env_step_final = round(max(0.1, champion[5]), 2)
-        env_count_final = int(max(1, champion[6]))
-        envelopes = [round(env_start_final + j * env_step_final, 2) for j in range(env_count_final)]
-        
-        params = {
-            'average_period':   avg_period_final, 'stop_loss_pct':    sl_pct_final,
-            'base_leverage':    base_lev_final, 'max_leverage':     50.0,
-            'target_atr_pct':   target_atr_final, 'envelopes_pct': envelopes,
-            'start_capital':    START_CAPITAL
-        }
-        
-        data_with_indicators = calculate_envelope_indicators(HISTORICAL_DATA.copy(), params)
-        final_result = run_envelope_backtest(data_with_indicators.dropna(), params)
-        
-        print("\n" + "="*50); print(f"                 --- GLOBALER PLATZ {i+1} ---"); print("="*50)
-        print(f"  HANDELSPAAR: {symbol}"); print(f"  TIMEFRAME:   {timeframe}")
-        print("\n  LEISTUNG:")
-        print(f"    Gewinn (PnL):      {final_result['total_pnl_pct']:.2f} %")
-        print(f"    Startkapital:      {START_CAPITAL:.2f} USDT")
-        print(f"    Endkapital:        {final_result['end_capital']:.2f} USDT")
-        print(f"    Anzahl Trades:     {int(final_result['trades_count'])}")
-        print(f"    Max. Drawdown:     {final_result.get('max_drawdown_pct', 0)*100:.2f}%")
-        
-        print("\n  ERMITTELTE EINSTELLWERTE:")
-        print(f"    average_period     {params['average_period']}")
-        print(f"    stop_loss_pct      {params['stop_loss_pct']}%")
-        print(f"    base_leverage      {params['base_leverage']}x (Max: {params['max_leverage']}x)")
-        print(f"    target_atr_pct     {params['target_atr_pct']}%")
-        print(f"    envelopes_pct      {params['envelopes_pct']}")
-        
-        trade_log_list = final_result.get('trade_log', [])
-        if trade_log_list:
-            print("\n  DETAILLIERTE HANDELS-CHRONIK:")
-            log_display_limit = 20
-            if len(trade_log_list) > log_display_limit:
-                display_list = trade_log_list[:10] + [None] + trade_log_list[-10:]
-                print(f"  (Zeige die ersten 10 und letzten 10 von {len(trade_log_list)} Trades)")
-            else:
-                display_list = trade_log_list
+            HISTORICAL_DATA = load_data(symbol, timeframe, start_date, end_date)
             
-            print("  " + "-"*102)
-            print("  {:^28} | {:<7} | {:<7} | {:>10} | {:>10} | {:>17} | {:>18}".format(
-                "Datum & Uhrzeit (UTC)", "Seite", "Hebel", "Einstieg", "Ausstieg", "Gewinn je Trade", "Neuer Kontostand"
-            ))
-            print("  " + "-"*102)
+            avg_period_final = int(max(2, champion[0]))
+            sl_pct_final = round(max(0.5, champion[1]), 2)
+            base_lev_final = int(max(1, champion[2]))
+            target_atr_final = round(max(0.1, champion[3]), 2)
+            env_start_final = round(max(0.1, champion[4]), 2)
+            env_step_final = round(max(0.1, champion[5]), 2)
+            env_count_final = int(max(1, champion[6]))
+            envelopes = [round(env_start_final + j * env_step_final, 2) for j in range(env_count_final)]
+            
+            params = {
+                'average_period':   avg_period_final, 'stop_loss_pct':    sl_pct_final,
+                'base_leverage':    base_lev_final, 'max_leverage':     50.0,
+                'target_atr_pct':   target_atr_final, 'envelopes_pct': envelopes,
+                'start_capital':    START_CAPITAL
+            }
+            
+            data_with_indicators = calculate_envelope_indicators(HISTORICAL_DATA.copy(), params)
+            final_result = run_envelope_backtest(data_with_indicators.dropna(), params)
+            
+            print("\n" + "="*50); print(f"                 --- GLOBALER PLATZ {i+1} ---"); print("="*50)
+            print(f"  HANDELSPAAR: {symbol}"); print(f"  TIMEFRAME:   {timeframe}")
+            print("\n  LEISTUNG:")
+            print(f"    Gewinn (PnL):      {final_result['total_pnl_pct']:.2f} %")
+            print(f"    Startkapital:      {START_CAPITAL:.2f} USDT")
+            print(f"    Endkapital:        {final_result['end_capital']:.2f} USDT")
+            print(f"    Anzahl Trades:     {int(final_result['trades_count'])}")
+            print(f"    Max. Drawdown:     {final_result.get('max_drawdown_pct', 0)*100:.2f}%")
+            
+            print("\n  ERMITTELTE EINSTELLWERTE:")
+            print(f"    average_period     {params['average_period']}")
+            print(f"    stop_loss_pct      {params['stop_loss_pct']}%")
+            print(f"    base_leverage      {params['base_leverage']}x (Max: {params['max_leverage']}x)")
+            print(f"    target_atr_pct     {params['target_atr_pct']}%")
+            print(f"    envelopes_pct      {params['envelopes_pct']}")
+            
+            trade_log_list = final_result.get('trade_log', [])
+            if trade_log_list:
+                print("\n  DETAILLIERTE HANDELS-CHRONIK:")
+                log_display_limit = 20
+                if len(trade_log_list) > log_display_limit:
+                    display_list = trade_log_list[:10] + [None] + trade_log_list[-10:]
+                    print(f"  (Zeige die ersten 10 und letzten 10 von {len(trade_log_list)} Trades)")
+                else:
+                    display_list = trade_log_list
+                
+                print("  " + "-"*102)
+                print("  {:^28} | {:<7} | {:<7} | {:>10} | {:>10} | {:>17} | {:>18}".format(
+                    "Datum & Uhrzeit (UTC)", "Seite", "Hebel", "Einstieg", "Ausstieg", "Gewinn je Trade", "Neuer Kontostand"
+                ))
+                print("  " + "-"*102)
 
-            for trade in display_list:
-                if trade is None:
-                    print("  ...".center(104))
-                    continue
-                side_str = trade['side'].capitalize().ljust(7)
-                leverage_str = f"{int(trade.get('leverage', 0))}x".ljust(7)
-                entry_str = f"{trade['entry']:.4f}".rjust(10)
-                exit_str = f"{trade['exit']:.4f}".rjust(10)
-                pnl_str = f"{trade['pnl']:+9.2f} USDT".rjust(17)
-                balance_str = f"{trade['balance']:.2f} USDT".rjust(18)
-                print(f"  {trade['timestamp']:<28} | {side_str} | {leverage_str} | {entry_str} | {exit_str} | {pnl_str} | {balance_str}")
-            print("  " + "-"*102)
-    print("\n" + "="*50)
+                for trade in display_list:
+                    if trade is None:
+                        print("  ...".center(104))
+                        continue
+                    side_str = trade['side'].capitalize().ljust(7)
+                    leverage_str = f"{int(trade.get('leverage', 0))}x".ljust(7)
+                    entry_str = f"{trade['entry']:.4f}".rjust(10)
+                    exit_str = f"{trade['exit']:.4f}".rjust(10)
+                    pnl_str = f"{trade['pnl']:+9.2f} USDT".rjust(17)
+                    balance_str = f"{trade['balance']:.2f} USDT".rjust(18)
+                    print(f"  {trade['timestamp']:<28} | {side_str} | {leverage_str} | {entry_str} | {exit_str} | {pnl_str} | {balance_str}")
+                print("  " + "-"*102)
+        print("\n" + "="*50)
