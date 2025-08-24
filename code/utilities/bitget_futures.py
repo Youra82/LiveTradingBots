@@ -14,7 +14,7 @@ class BitgetFutures():
             self.session = ccxt.bitget(api_setup)
 
         self.markets = self.session.load_markets()
-  
+    
     def fetch_ticker(self, symbol: str) -> Dict[str, Any]:
         try:
             return self.session.fetch_ticker(symbol)
@@ -25,7 +25,7 @@ class BitgetFutures():
         try:
             return self.markets[symbol]['limits']['amount']['min']
         except Exception as e:
-            raise Exception(f"Failed to fetch minimum amount tradable: {e}")        
+            raise Exception(f"Failed to fetch minimum amount tradable: {e}")      
         
     def amount_to_precision(self, symbol: str, amount: float) -> str:
         try:
@@ -94,12 +94,6 @@ class BitgetFutures():
         except Exception as e:
             raise Exception(f"Failed to fetch open positions: {e}")
 
-    def flash_close_position(self, symbol: str, side: Optional[str] = None) -> Dict[str, Any]:
-        try:
-            return self.session.close_position(symbol, side=side)
-        except Exception as e:
-            raise Exception(f"Failed to fetch closed order for {symbol}", e)
-
     def set_margin_mode(self, symbol: str, margin_mode: str = 'isolated') -> None:
         try:
             self.session.set_margin_mode(
@@ -110,126 +104,86 @@ class BitgetFutures():
         except Exception as e:
             raise Exception(f"Failed to set margin mode: {e}")
 
-    def set_leverage(self, symbol: str, margin_mode: str = 'isolated', leverage: int = 1) -> None:
+    def set_leverage(self, symbol: str, leverage: int = 1) -> None:
         try:
-            if margin_mode == 'isolated':
-                self.session.set_leverage(
-                    leverage,
-                    symbol,
-                    params={
-                        'productType': 'USDT-FUTURES',
-                        'marginCoin': 'USDT',
-                        'holdSide': 'long',
-                    },
-                )
-                self.session.set_leverage(
-                    leverage,
-                    symbol,
-                    params={
-                        'productType': 'USDT-FUTURES',
-                        'marginCoin': 'USDT',
-                        'holdSide': 'short',
-                    },
-                )
-            else:
-                self.session.set_leverage(
-                    leverage,
-                    symbol,
-                    params={'productType': 'USDT-FUTURES', 'marginCoin': 'USDT'},
-                )
+            self.session.set_leverage(
+                leverage,
+                symbol,
+                params={
+                    'productType': 'USDT-FUTURES',
+                    'marginCoin': 'USDT',
+                    'holdSide': 'long',
+                },
+            )
+            self.session.set_leverage(
+                leverage,
+                symbol,
+                params={
+                    'productType': 'USDT-FUTURES',
+                    'marginCoin': 'USDT',
+                    'holdSide': 'short',
+                },
+            )
         except Exception as e:
             raise Exception(f"Failed to set leverage: {e}")
 
     def fetch_recent_ohlcv(self, symbol: str, timeframe: str, limit: int = 1000) -> pd.DataFrame:
-        bitget_fetch_limit = 200
-        timeframe_to_milliseconds = {
-            '1m': 60000, '5m': 300000, '15m': 900000, '30m': 1800000, '1h': 3600000, '2h': 7200000, '4h': 14400000, '1d': 86400000,
-        }
-        end_timestamp = int(time.time() * 1000)
-        start_timestamp = end_timestamp - (limit * timeframe_to_milliseconds[timeframe])
-        current_timestamp = start_timestamp
+        timeframe_in_ms = self.session.parse_timeframe(timeframe) * 1000
+        since = self.session.milliseconds() - limit * timeframe_in_ms
+        all_ohlcv = []
+        try:
+            all_ohlcv = self.session.fetch_ohlcv(symbol, timeframe, since=since, limit=limit)
+        except Exception as e:
+            raise Exception(f"Failed to fetch OHLCV data for {symbol} in timeframe {timeframe}: {e}")
 
-        ohlcv_data = []
-        while current_timestamp < end_timestamp:
-            request_end_timestamp = min(current_timestamp + (bitget_fetch_limit * timeframe_to_milliseconds[timeframe]),
-                                        end_timestamp)
-            try:
-                fetched_data = self.session.fetch_ohlcv(
-                    symbol,
-                    timeframe,
-                    params={
-                        "startTime": str(current_timestamp),
-                        "endTime": str(request_end_timestamp),
-                        "limit": bitget_fetch_limit,
-                    }
-                )
-                ohlcv_data.extend(fetched_data)
-            except Exception as e:
-                raise Exception(f"Failed to fetch OHLCV data for {symbol} in timeframe {timeframe}: {e}")
-
-            current_timestamp += (bitget_fetch_limit * timeframe_to_milliseconds[timeframe]) + 1
-
-        df = pd.DataFrame(ohlcv_data, columns=['timestamp', 'open', 'high', 'low', 'close', 'volume'])
-        df['timestamp'] = pd.to_datetime(df['timestamp'], unit='ms')
+        df = pd.DataFrame(all_ohlcv, columns=['timestamp', 'open', 'high', 'low', 'close', 'volume'])
+        df['timestamp'] = pd.to_datetime(df['timestamp'], unit='ms', utc=True)
         df.set_index('timestamp', inplace=True)
         df.sort_index(inplace=True)
-
         return df
 
-    def place_market_order(self, symbol: str, side: str, amount: float, reduce: bool = False) -> Dict[str, Any]:
-        try:
-            params = {
-                'reduceOnly': reduce,
-            }
-            amount = self.amount_to_precision(symbol, amount)
-            return self.session.create_order(symbol, 'market', side, amount, params=params)
-
-        except Exception as e:
-            raise Exception(f"Failed to place market order of {amount} {symbol}: {e}")
+    def fetch_historical_ohlcv(self, symbol: str, timeframe: str, start_date_str: str, end_date_str: str) -> pd.DataFrame:
+        from datetime import datetime, timezone
+        start_ts = int(datetime.strptime(start_date_str, "%Y-%m-%d").replace(tzinfo=timezone.utc).timestamp() * 1000)
+        end_ts = int(datetime.strptime(end_date_str, "%Y-%m-%d").replace(tzinfo=timezone.utc).timestamp() * 1000)
+        all_ohlcv = []
+        while start_ts < end_ts:
+            try:
+                ohlcv = self.session.fetch_ohlcv(symbol, timeframe, since=start_ts, limit=1000)
+                if not ohlcv: break
+                all_ohlcv.extend(ohlcv)
+                last_timestamp = ohlcv[-1][0]
+                if last_timestamp >= start_ts:
+                     start_ts = last_timestamp + 1
+                else: break
+            except Exception as e:
+                raise Exception(f"Failed to fetch historical OHLCV data for {symbol}: {e}")
+        if not all_ohlcv: return pd.DataFrame()
+        df = pd.DataFrame(all_ohlcv, columns=['timestamp', 'open', 'high', 'low', 'close', 'volume'])
+        df['timestamp'] = pd.to_datetime(df['timestamp'], unit='ms', utc=True)
+        df.set_index('timestamp', inplace=True)
+        df = df[~df.index.duplicated(keep='first')]
+        df.sort_index(inplace=True)
+        return df
 
     def place_limit_order(self, symbol: str, side: str, amount: float, price: float, reduce: bool = False) -> Dict[str, Any]:
         try:
-            params = {
-                'reduceOnly': reduce,
-            }
-            amount = self.amount_to_precision(symbol, amount)
-            price = self.price_to_precision(symbol, price)
-            return self.session.create_order(symbol, 'limit', side, amount, price, params=params)
-
+            params = {'reduceOnly': reduce}
+            amount_str = self.session.amount_to_precision(symbol, amount)
+            price_str = self.session.price_to_precision(symbol, price)
+            return self.session.create_order(symbol, 'limit', side, float(amount_str), float(price_str), params=params)
         except Exception as e:
             raise Exception(f"Failed to place limit order of {amount} {symbol} at price {price}: {e}")
 
-    def place_trigger_market_order(self, symbol: str, side: str, amount: float, trigger_price: float, reduce: bool = False, print_error: bool = False) -> Optional[Dict[str, Any]]:
+    def place_trigger_market_order(self, symbol: str, side: str, amount: float, trigger_price: float, reduce: bool = False) -> Optional[Dict[str, Any]]:
         try:
-            amount = self.amount_to_precision(symbol, amount)
-            trigger_price = self.price_to_precision(symbol, trigger_price)
+            amount_str = self.session.amount_to_precision(symbol, amount)
+            trigger_price_str = self.session.price_to_precision(symbol, trigger_price)
             params = {
                 'reduceOnly': reduce,
-                'triggerPrice': trigger_price,
-                'delegateType': 'price_fill',
+                'stopPrice': trigger_price_str,
+                'triggerType': 'market_price'
             }
-            return self.session.create_order(symbol, 'market', side, amount, params=params)
+            return self.session.create_order(symbol, 'market', side, float(amount_str), params=params)
         except Exception as err:
-            if print_error:
-                print(err)
-                return None
-            else:
-                raise err
-
-    def place_trigger_limit_order(self, symbol: str, side: str, amount: float, trigger_price: float, price: float, reduce: bool = False, print_error: bool = False) -> Optional[Dict[str, Any]]:
-        try:
-            amount = self.amount_to_precision(symbol, amount)
-            trigger_price = self.price_to_precision(symbol, trigger_price)
-            price = self.price_to_precision(symbol, price)
-            params = {
-                'reduceOnly': reduce,
-                'triggerPrice': trigger_price,
-                'delegateType': 'price_fill',
-            }
-            return self.session.create_order(symbol, 'limit', side, amount, price, params=params)
-        except Exception as err:
-            if print_error:
-                print(err)
-                return None
-            else:
-                raise err
+            raise err
