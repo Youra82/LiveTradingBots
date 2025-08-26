@@ -28,7 +28,7 @@ def load_config():
 params = load_config()
 
 # --- Authentifizierung & Initialisierung ---
-logger.info(f">>> Starte Ausführung für {params['symbol']}")
+logger.info(f">>> Starte Ausführung für {params['market']['symbol']}")
 try:
     key_path = os.path.abspath(os.path.join(PROJECT_ROOT, 'secret.json'))
     with open(key_path, "r") as f:
@@ -38,7 +38,7 @@ except Exception as e:
     sys.exit(1)
 
 bitget = BitgetFutures(api_setup)
-tracker_file = os.path.join(os.path.dirname(__file__), f"tracker_{params['symbol'].replace('/', '-')}.json")
+tracker_file = os.path.join(os.path.dirname(__file__), f"tracker_{params['market']['symbol'].replace('/', '-')}.json")
 
 # --- Tracker-Funktionen ---
 if not os.path.exists(tracker_file):
@@ -55,22 +55,25 @@ def update_tracker_file(file_path, data):
 
 def main():
     try:
+        symbol = params['market']['symbol']
+        timeframe = params['market']['timeframe']
+        
         # --- BEREINIGUNG & DATENLADEN ---
         logger.info("Storniere alte Limit-Orders...")
-        orders = bitget.fetch_open_orders(params['symbol'])
+        orders = bitget.fetch_open_orders(symbol)
         for order in orders: 
-            bitget.cancel_order(order['id'], params['symbol'])
+            bitget.cancel_order(order['id'], symbol)
 
         logger.info("Lade Marktdaten...")
-        data = bitget.fetch_recent_ohlcv(params['symbol'], params['timeframe'], 200)
+        data = bitget.fetch_recent_ohlcv(symbol, timeframe, 200)
         
-        data = calculate_envelope_indicators(data, params)
+        data = calculate_envelope_indicators(data, {**params['strategy'], **params['risk']})
         latest_complete_candle = data.iloc[-2]
         logger.info("Indikatoren berechnet.")
 
         # --- POSITIONS- & STATUS-CHECKS ---
         tracker_info = read_tracker_file(tracker_file)
-        positions = bitget.fetch_open_positions(params['symbol'])
+        positions = bitget.fetch_open_positions(symbol)
         open_position = positions[0] if positions else None
 
         if open_position is None and tracker_info['status'] != "ok_to_trade":
@@ -93,24 +96,24 @@ def main():
             amount = open_position['contracts']
             avg_entry = float(open_position['entryPrice'])
             
-            trigger_orders = bitget.fetch_open_trigger_orders(params['symbol'])
+            trigger_orders = bitget.fetch_open_trigger_orders(symbol)
             for order in trigger_orders:
-                bitget.cancel_trigger_order(order['id'], params['symbol'])
+                bitget.cancel_trigger_order(order['id'], symbol)
             
-            sl_price = avg_entry * (1 - params['stop_loss_pct']/100) if side == 'long' else avg_entry * (1 + params['stop_loss_pct']/100)
+            sl_price = avg_entry * (1 - params['risk']['stop_loss_pct']/100) if side == 'long' else avg_entry * (1 + params['risk']['stop_loss_pct']/100)
             tp_price = latest_complete_candle['average']
 
-            bitget.place_trigger_market_order(params['symbol'], close_side, amount, tp_price, reduce=True)
-            bitget.place_trigger_market_order(params['symbol'], close_side, amount, sl_price, reduce=True)
+            bitget.place_trigger_market_order(symbol, close_side, amount, tp_price, reduce=True)
+            bitget.place_trigger_market_order(symbol, close_side, amount, sl_price, reduce=True)
             update_tracker_file(tracker_file, {"status": "in_trade", "last_side": side})
             logger.info(f"TP-Order @{tp_price:.4f} und SL-Order @{sl_price:.4f} platziert/aktualisiert.")
 
         elif tracker_info['status'] == "ok_to_trade":
             logger.info("Keine Position offen, prüfe auf neue Einstiege.")
             
-            base_leverage = params.get('base_leverage', 10)
-            target_atr_pct = params.get('target_atr_pct', 1.5)
-            max_leverage = params.get('max_leverage', 50)
+            base_leverage = params['risk']['base_leverage']
+            target_atr_pct = params['risk']['target_atr_pct']
+            max_leverage = params['risk']['max_leverage']
             current_atr_pct = latest_complete_candle['atr_pct']
             
             leverage = base_leverage
@@ -121,24 +124,24 @@ def main():
             
             logger.info(f"Aktueller ATR: {current_atr_pct:.2f}%. Ziel-ATR: {target_atr_pct}%. Berechneter Hebel: {leverage}x")
 
-            bitget.set_margin_mode(params['symbol'], margin_mode=params['margin_mode'])
-            bitget.set_leverage(params['symbol'], leverage=leverage)
+            bitget.set_margin_mode(symbol, margin_mode=params['risk']['margin_mode'])
+            bitget.set_leverage(symbol, leverage=leverage)
             
-            balance = params['balance_fraction_pct']/100 * bitget.fetch_balance()['USDT']['total']
-            amount_per_grid = (balance * leverage) / len(params['envelopes_pct'])
+            balance = params['risk']['balance_fraction_pct']/100 * bitget.fetch_balance()['USDT']['total']
+            amount_per_grid = (balance * leverage) / len(params['strategy']['envelopes_pct'])
             
-            if params.get('use_longs', True):
-                for i, e_pct in enumerate(params['envelopes_pct']):
+            if params['behavior'].get('use_longs', True):
+                for i, e_pct in enumerate(params['strategy']['envelopes_pct']):
                     entry_price = latest_complete_candle[f'band_low_{i + 1}']
                     amount = amount_per_grid / entry_price
-                    bitget.place_limit_order(params['symbol'], 'buy', amount, entry_price)
+                    bitget.place_limit_order(symbol, 'buy', amount, entry_price)
                     logger.info(f"Platziere Long-Grid {i+1}: Entry @{entry_price:.4f}")
 
-            if params.get('use_shorts', True):
-                for i, e_pct in enumerate(params['envelopes_pct']):
+            if params['behavior'].get('use_shorts', True):
+                for i, e_pct in enumerate(params['strategy']['envelopes_pct']):
                     entry_price = latest_complete_candle[f'band_high_{i + 1}']
                     amount = amount_per_grid / entry_price
-                    bitget.place_limit_order(params['symbol'], 'sell', amount, entry_price)
+                    bitget.place_limit_order(symbol, 'sell', amount, entry_price)
                     logger.info(f"Platziere Short-Grid {i+1}: Entry @{entry_price:.4f}")
 
     except Exception as e:
