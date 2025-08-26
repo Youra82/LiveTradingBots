@@ -264,13 +264,14 @@ if __name__ == "__main__":
             print(f"    Anzahl Trades:     {int(final_result['trades_count'])}")
             print(f"    Max. Drawdown:     {final_result.get('max_drawdown_pct', 0)*100:.2f}%")
             
+            # NEU: Ausgabe mit Kommentaren
             print("\n  ERMITTELTE EINSTELLWERTE:")
-            print(f"    average_period     {params['average_period']}")
-            print(f"    stop_loss_pct      {params['stop_loss_pct']}%")
-            print(f"    base_leverage      {params['base_leverage']}x (Max: {params['max_leverage']}x)")
-            print(f"    target_atr_pct     {params['target_atr_pct']}%")
-            print(f"    envelopes_pct      {params['envelopes_pct']}")
-            
+            print(f"    {'average_period':<18}: {str(params['average_period']):<20} | Anzahl Kerzen für den Durchschnitt")
+            print(f"    {'stop_loss_pct':<18}: {str(params['stop_loss_pct']) + '%':<20} | Verlustbegrenzung in Prozent")
+            print(f"    {'base_leverage':<18}: {str(params['base_leverage']) + 'x':<20} | Basis-Hebel (Max: {params['max_leverage']}x)")
+            print(f"    {'target_atr_pct':<18}: {str(params['target_atr_pct']) + '%':<20} | Volatilitäts-Ziel für den Hebel")
+            print(f"    {'envelopes_pct':<18}: {str(params['envelopes_pct']):<20} | Abstände der Grid-Linien")
+
             trade_log_list = final_result.get('trade_log', [])
             if trade_log_list:
                 print("\n  DETAILLIERTE HANDELS-CHRONIK:")
