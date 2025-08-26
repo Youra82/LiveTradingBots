@@ -1,5 +1,7 @@
 {
     "market": {
+        "_comment": "Einstellungen zum Markt und Handelspaar",
+
         "_comment_symbol": "Das Handelspaar im Bitget-Format (BASIS/QUOTE:QUOTE)",
         "symbol": "BTC/USDT:USDT",
 
