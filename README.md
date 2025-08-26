@@ -6,7 +6,7 @@ _A homemade humble library to run automated python crypto trading bots_
 🛠️ Setup commands (virtual environment included)
 -------------
 > git clone https://github.com/Youra82/LiveTradingBots.git \
-> bash stbot/install.sh
+> bash LiveTradingBots/install.sh
 
 Botausführung:
 > bash LiveTradingBots/code/run_envelope.sh
