@@ -156,7 +156,7 @@ if __name__ == "__main__":
     
     print("\n--- Testumgebung definieren ---")
     symbol_input = get_validated_input("Handelspaar(e) eingeben (z.B. BTC ETH): ", str)
-    timeframe_input = get_validated_input("Zeitfenster eingeben (z.B. 1h 4h): ", str)
+    timeframe_input = get_validated_input("Zeitfenster eingeben (einzeln oder mit Leerzeichen getrennt, z.B. 1h 4h): ", str)
     start_date = get_validated_input("Startdatum eingeben (JJJJ-MM-TT): ", str)
     end_date = get_validated_input("Enddatum eingeben (JJJJ-MM-TT): ", str)
     
@@ -175,14 +175,12 @@ if __name__ == "__main__":
     
     grand_hall_of_fame = []
 
-    # NEU: Äußere Schleife für die Handelspaare
     for symbol_short in symbols_to_run:
         symbol = f"{symbol_short.upper()}/USDT:USDT"
         print("\n" + "#"*80)
         print(f"####### OPTIMIERE HANDELSPAAR: {symbol.upper()} #######".center(80))
         print("#"*80)
 
-        # Innere Schleife für die Zeitfenster
         for timeframe in timeframes_to_run:
             print("\n" + "="*80)
             print(f"=== STARTE OPTIMIERUNG FÜR TIMEFRAME: {timeframe.upper()} ===".center(80))
