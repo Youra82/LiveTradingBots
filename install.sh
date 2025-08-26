@@ -1,4 +1,3 @@
-cat << 'EOF' > install.sh
 #!/bin/bash
 
 echo "--- Starte die Einrichtung des Trading Bots ---"
@@ -33,4 +32,3 @@ echo -e "\n--------------------------------------------------------"
 echo -e "✔ Installation erfolgreich abgeschlossen!"
 echo -e "Die virtuelle Umgebung ist jetzt in '$CODE_DIR/.venv' bereit."
 echo -e "--------------------------------------------------------"
-EOF
