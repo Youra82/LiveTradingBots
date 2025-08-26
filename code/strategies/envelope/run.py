@@ -4,6 +4,7 @@ import json
 from datetime import datetime
 import logging
 import pandas as pd
+import traceback
 
 # Passe den Pfad an, um die Utilities zu finden
 PROJECT_ROOT = os.path.join(os.path.dirname(__file__), '..', '..', '..')
@@ -11,6 +12,7 @@ sys.path.append(os.path.join(PROJECT_ROOT, 'code'))
 
 from utilities.bitget_futures import BitgetFutures
 from utilities.strategy_logic import calculate_envelope_indicators
+from utilities.telegram_handler import send_telegram_message # NEU: Import für Telegram
 
 # --- Logging einrichten ---
 LOG_DIR = os.path.join(PROJECT_ROOT, 'logs')
@@ -32,7 +34,9 @@ logger.info(f">>> Starte Ausführung für {params['market']['symbol']}")
 try:
     key_path = os.path.abspath(os.path.join(PROJECT_ROOT, 'secret.json'))
     with open(key_path, "r") as f:
-        api_setup = json.load(f)['envelope']
+        secrets = json.load(f)
+    api_setup = secrets['envelope']
+    telegram_config = secrets.get('telegram', {}) # NEU: Telegram-Konfiguration laden
 except Exception as e:
     logger.critical(f"Fehler beim Laden der API-Schlüssel: {e}")
     sys.exit(1)
@@ -54,8 +58,14 @@ def update_tracker_file(file_path, data):
         json.dump(data, file)
 
 def main():
+    # NEU: Telegram-Benachrichtigung beim Start
+    bot_token = telegram_config.get('bot_token')
+    chat_id = telegram_config.get('chat_id')
+    symbol = params['market']['symbol']
+    
+    send_telegram_message(bot_token, chat_id, f"🤖 Bot für *{symbol}* gestartet.")
+    
     try:
-        symbol = params['market']['symbol']
         timeframe = params['market']['timeframe']
         
         # --- BEREINIGUNG & DATENLADEN ---
@@ -72,21 +82,29 @@ def main():
         logger.info("Indikatoren berechnet.")
 
         # --- POSITIONS- & STATUS-CHECKS ---
-        tracker_info = read_tracker_file(tracker_file)
+        tracker_info_before = read_tracker_file(tracker_file) # Status vor der Ausführung
         positions = bitget.fetch_open_positions(symbol)
         open_position = positions[0] if positions else None
 
-        if open_position is None and tracker_info['status'] != "ok_to_trade":
+        # NEU: Erkennen, ob eine Position geschlossen wurde
+        if open_position is None and tracker_info_before['status'] == 'in_trade':
+            side = tracker_info_before.get('last_side', 'Unbekannt')
+            message = f"✅ Position für *{symbol}* ({side}) wurde geschlossen. PnL wird beim nächsten Lauf der Analyse sichtbar."
+            send_telegram_message(bot_token, chat_id, message)
+            logger.info(message)
+
+        if open_position is None and tracker_info_before['status'] != "ok_to_trade":
             last_price = latest_complete_candle['close']
             resume_price = latest_complete_candle['average']
-            if ('long' in tracker_info.get('last_side', '') and last_price >= resume_price) or \
-               ('short' in tracker_info.get('last_side', '') and last_price <= resume_price):
+            if ('long' in tracker_info_before.get('last_side', '') and last_price >= resume_price) or \
+               ('short' in tracker_info_before.get('last_side', '') and last_price <= resume_price):
                 logger.info(f"Status wird auf 'ok_to_trade' zurückgesetzt.")
-                update_tracker_file(tracker_file, {"status": "ok_to_trade", "last_side": tracker_info.get('last_side')})
-                tracker_info['status'] = "ok_to_trade"
+                update_tracker_file(tracker_file, {"status": "ok_to_trade", "last_side": tracker_info_before.get('last_side')})
             else:
-                logger.info(f"Status ist '{tracker_info['status']}'. Warte auf Rückkehr zum Mittelwert.")
+                logger.info(f"Status ist '{tracker_info_before['status']}'. Warte auf Rückkehr zum Mittelwert.")
                 return
+
+        tracker_info = read_tracker_file(tracker_file) # Status neu laden, falls er zurückgesetzt wurde
 
         # --- TRADING LOGIK ---
         if open_position:
@@ -130,6 +148,10 @@ def main():
             balance = params['risk']['balance_fraction_pct']/100 * bitget.fetch_balance()['USDT']['total']
             amount_per_grid = (balance * leverage) / len(params['strategy']['envelopes_pct'])
             
+            # NEU: Sende eine Benachrichtigung, wenn neue Orders platziert werden
+            message = f"📈 Neue Grid-Orders für *{symbol}* platziert.\n- Hebel: {leverage}x"
+            send_telegram_message(bot_token, chat_id, message)
+            
             if params['behavior'].get('use_longs', True):
                 for i, e_pct in enumerate(params['strategy']['envelopes_pct']):
                     entry_price = latest_complete_candle[f'band_low_{i + 1}']
@@ -145,7 +167,13 @@ def main():
                     logger.info(f"Platziere Short-Grid {i+1}: Entry @{entry_price:.4f}")
 
     except Exception as e:
+        # NEU: Sende eine Benachrichtigung bei einem Fehler
         logger.error(f"Ein unerwarteter Fehler ist aufgetreten: {e}", exc_info=True)
+        error_message = f"🚨 KRITISCHER FEHLER im Bot für *{symbol}*!\n\n`{traceback.format_exc()}`"
+        # Kürze die Nachricht, falls sie zu lang ist
+        if len(error_message) > 4000:
+            error_message = error_message[:4000] + "..."
+        send_telegram_message(bot_token, chat_id, error_message)
 
 if __name__ == "__main__":
     main()
