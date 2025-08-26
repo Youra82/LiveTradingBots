@@ -12,7 +12,7 @@ Botausführung:
 > bash LiveTradingBots/code/run_envelope.sh
 
 Monitorinstallation:
-> chmod +x monitor_bot.sh
+> chmod +x run_genetic_optimizer.sh
 
 Monitorabfrage:
 > ./monitor_bot.sh
