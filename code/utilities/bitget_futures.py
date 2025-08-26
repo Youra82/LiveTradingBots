@@ -106,6 +106,7 @@ class BitgetFutures():
 
     def set_leverage(self, symbol: str, leverage: int = 1) -> None:
         try:
+            # Für Bitget muss der Hebel für Long und Short separat gesetzt werden
             self.session.set_leverage(
                 leverage,
                 symbol,
@@ -182,7 +183,6 @@ class BitgetFutures():
             params = {
                 'reduceOnly': reduce,
                 'stopPrice': trigger_price_str,
-                'triggerType': 'market_price'
             }
             return self.session.create_order(symbol, 'market', side, float(amount_str), params=params)
         except Exception as err:
