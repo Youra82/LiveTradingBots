@@ -143,34 +143,37 @@ def main():
             bitget.set_margin_mode(symbol, margin_mode=params['risk']['margin_mode'])
             bitget.set_leverage(symbol, leverage=leverage)
             
-            # KORRIGIERTE KAPITALBERECHNUNG
+            # FINALE, KORRIGIERTE KAPITALBERECHNUNG
             free_balance = bitget.fetch_balance()['USDT']['free']
             capital_to_use = free_balance * (params['risk']['balance_fraction_pct'] / 100.0)
             
             num_grids = len(params['strategy']['envelopes_pct'])
             if num_grids == 0:
-                logger.warning("Keine 'envelopes_pct' in der Konfiguration gefunden. Es werden keine Trades platziert.")
+                logger.warning("Keine 'envelopes_pct' in der Konfiguration gefunden.")
                 return
+            
+            num_sides = (1 if params['behavior'].get('use_longs', False) else 0) + \
+                        (1 if params['behavior'].get('use_shorts', False) else 0)
+            if num_sides == 0: return
 
-            # Das Kapital wird auf die Grids aufgeteilt
-            capital_per_grid = capital_to_use / num_grids
-            # Daraus wird die Positionsgröße (notional value) pro Grid berechnet
-            notional_amount_per_grid = capital_per_grid * leverage
+            total_orders_to_place = num_grids * num_sides
+            capital_per_order = capital_to_use / total_orders_to_place
+            notional_amount_per_order = capital_per_order * leverage
             
             message = f"📈 Neue Grid-Orders für *{symbol}* platziert.\n- Hebel: {leverage}x"
             send_telegram_message(bot_token, chat_id, message)
             
             if params['behavior'].get('use_longs', True):
-                for i, e_pct in enumerate(params['strategy']['envelopes_pct']):
+                for i in range(num_grids):
                     entry_price = latest_complete_candle[f'band_low_{i + 1}']
-                    amount = notional_amount_per_grid / entry_price # Umrechnung in Coin-Menge
+                    amount = notional_amount_per_order / entry_price
                     bitget.place_limit_order(symbol, 'buy', amount, entry_price)
                     logger.info(f"Platziere Long-Grid {i+1}: Entry @{entry_price:.4f}")
 
             if params['behavior'].get('use_shorts', True):
-                for i, e_pct in enumerate(params['strategy']['envelopes_pct']):
+                for i in range(num_grids):
                     entry_price = latest_complete_candle[f'band_high_{i + 1}']
-                    amount = notional_amount_per_grid / entry_price # Umrechnung in Coin-Menge
+                    amount = notional_amount_per_order / entry_price
                     bitget.place_limit_order(symbol, 'sell', amount, entry_price)
                     logger.info(f"Platziere Short-Grid {i+1}: Entry @{entry_price:.4f}")
 
