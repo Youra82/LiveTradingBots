@@ -175,7 +175,7 @@ def main():
             bitget.set_margin_mode(SYMBOL, margin_mode=params['risk']['margin_mode'])
             bitget.set_leverage(SYMBOL, leverage=leverage)
             
-            # Kapitalberechnung
+            # --- KORRIGIERTE KAPITALBERECHNUNG ---
             free_balance = bitget.fetch_balance()['USDT']['free']
             capital_to_use = free_balance * (params['risk']['balance_fraction_pct'] / 100.0)
             
@@ -184,8 +184,16 @@ def main():
                 logger.warning("Keine 'envelopes_pct' in der Konfiguration gefunden.")
                 return
             
-            # Grid-Orders platzieren
-            notional_amount_per_order = (capital_to_use / num_grids) * leverage
+            # BUGFIX: Zähle, wie viele Seiten (Long/Short) aktiv sind, um das Kapital fair aufzuteilen.
+            num_sides_active = (1 if params['behavior'].get('use_longs', False) else 0) + \
+                               (1 if params['behavior'].get('use_shorts', False) else 0)
+            
+            if num_sides_active == 0:
+                logger.warning("Sowohl 'use_longs' als auch 'use_shorts' sind deaktiviert. Es werden keine Orders platziert.")
+                return
+
+            capital_per_side = capital_to_use / num_sides_active
+            notional_amount_per_order = (capital_per_side / num_grids) * leverage
             
             message = f"📈 Neue Grid-Orders für *{SYMBOL}* platziert.\n- Hebel: {leverage}x"
             send_telegram_message(bot_token, chat_id, message)
