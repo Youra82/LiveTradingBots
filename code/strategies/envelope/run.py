@@ -12,7 +12,7 @@ sys.path.append(os.path.join(PROJECT_ROOT, 'code'))
 
 from utilities.bitget_futures import BitgetFutures
 from utilities.strategy_logic import calculate_envelope_indicators
-from utilities.telegram_handler import send_telegram_message # NEU: Import für Telegram
+from utilities.telegram_handler import send_telegram_message
 
 # --- Logging einrichten ---
 LOG_DIR = os.path.join(PROJECT_ROOT, 'logs')
@@ -36,7 +36,7 @@ try:
     with open(key_path, "r") as f:
         secrets = json.load(f)
     api_setup = secrets['envelope']
-    telegram_config = secrets.get('telegram', {}) # NEU: Telegram-Konfiguration laden
+    telegram_config = secrets.get('telegram', {})
 except Exception as e:
     logger.critical(f"Fehler beim Laden der API-Schlüssel: {e}")
     sys.exit(1)
@@ -58,7 +58,6 @@ def update_tracker_file(file_path, data):
         json.dump(data, file)
 
 def main():
-    # NEU: Telegram-Benachrichtigung beim Start
     bot_token = telegram_config.get('bot_token')
     chat_id = telegram_config.get('chat_id')
     symbol = params['market']['symbol']
@@ -82,14 +81,13 @@ def main():
         logger.info("Indikatoren berechnet.")
 
         # --- POSITIONS- & STATUS-CHECKS ---
-        tracker_info_before = read_tracker_file(tracker_file) # Status vor der Ausführung
+        tracker_info_before = read_tracker_file(tracker_file)
         positions = bitget.fetch_open_positions(symbol)
         open_position = positions[0] if positions else None
 
-        # NEU: Erkennen, ob eine Position geschlossen wurde
         if open_position is None and tracker_info_before['status'] == 'in_trade':
             side = tracker_info_before.get('last_side', 'Unbekannt')
-            message = f"✅ Position für *{symbol}* ({side}) wurde geschlossen. PnL wird beim nächsten Lauf der Analyse sichtbar."
+            message = f"✅ Position für *{symbol}* ({side}) wurde geschlossen."
             send_telegram_message(bot_token, chat_id, message)
             logger.info(message)
 
@@ -104,7 +102,7 @@ def main():
                 logger.info(f"Status ist '{tracker_info_before['status']}'. Warte auf Rückkehr zum Mittelwert.")
                 return
 
-        tracker_info = read_tracker_file(tracker_file) # Status neu laden, falls er zurückgesetzt wurde
+        tracker_info = read_tracker_file(tracker_file)
 
         # --- TRADING LOGIK ---
         if open_position:
@@ -145,32 +143,40 @@ def main():
             bitget.set_margin_mode(symbol, margin_mode=params['risk']['margin_mode'])
             bitget.set_leverage(symbol, leverage=leverage)
             
-            balance = params['risk']['balance_fraction_pct']/100 * bitget.fetch_balance()['USDT']['total']
-            amount_per_grid = (balance * leverage) / len(params['strategy']['envelopes_pct'])
+            # KORRIGIERTE KAPITALBERECHNUNG
+            free_balance = bitget.fetch_balance()['USDT']['free']
+            capital_to_use = free_balance * (params['risk']['balance_fraction_pct'] / 100.0)
             
-            # NEU: Sende eine Benachrichtigung, wenn neue Orders platziert werden
+            num_grids = len(params['strategy']['envelopes_pct'])
+            if num_grids == 0:
+                logger.warning("Keine 'envelopes_pct' in der Konfiguration gefunden. Es werden keine Trades platziert.")
+                return
+
+            # Das Kapital wird auf die Grids aufgeteilt
+            capital_per_grid = capital_to_use / num_grids
+            # Daraus wird die Positionsgröße (notional value) pro Grid berechnet
+            notional_amount_per_grid = capital_per_grid * leverage
+            
             message = f"📈 Neue Grid-Orders für *{symbol}* platziert.\n- Hebel: {leverage}x"
             send_telegram_message(bot_token, chat_id, message)
             
             if params['behavior'].get('use_longs', True):
                 for i, e_pct in enumerate(params['strategy']['envelopes_pct']):
                     entry_price = latest_complete_candle[f'band_low_{i + 1}']
-                    amount = amount_per_grid / entry_price
+                    amount = notional_amount_per_grid / entry_price # Umrechnung in Coin-Menge
                     bitget.place_limit_order(symbol, 'buy', amount, entry_price)
                     logger.info(f"Platziere Long-Grid {i+1}: Entry @{entry_price:.4f}")
 
             if params['behavior'].get('use_shorts', True):
                 for i, e_pct in enumerate(params['strategy']['envelopes_pct']):
                     entry_price = latest_complete_candle[f'band_high_{i + 1}']
-                    amount = amount_per_grid / entry_price
+                    amount = notional_amount_per_grid / entry_price # Umrechnung in Coin-Menge
                     bitget.place_limit_order(symbol, 'sell', amount, entry_price)
                     logger.info(f"Platziere Short-Grid {i+1}: Entry @{entry_price:.4f}")
 
     except Exception as e:
-        # NEU: Sende eine Benachrichtigung bei einem Fehler
         logger.error(f"Ein unerwarteter Fehler ist aufgetreten: {e}", exc_info=True)
         error_message = f"🚨 KRITISCHER FEHLER im Bot für *{symbol}*!\n\n`{traceback.format_exc()}`"
-        # Kürze die Nachricht, falls sie zu lang ist
         if len(error_message) > 4000:
             error_message = error_message[:4000] + "..."
         send_telegram_message(bot_token, chat_id, error_message)
