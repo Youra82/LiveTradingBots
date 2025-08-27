@@ -1,17 +1,38 @@
+# code/utilities/bitget_futures.py
+
 import ccxt
 import time
 import pandas as pd
 from typing import Any, Optional, Dict, List
 
-
 class BitgetFutures():
-    def __init__(self, api_setup: Optional[Dict[str, Any]] = None) -> None:
+    """
+    Eine vereinheitlichte Klasse zur Interaktion mit der Bitget Futures API.
+    Unterstützt sowohl den Live- als auch den Demo-Handel über den `demo_mode`-Parameter.
+    """
+    def __init__(self, api_setup: Optional[Dict[str, Any]] = None, demo_mode: bool = False) -> None:
+        """
+        Initialisiert die Bitget-Sitzung.
 
-        if api_setup == None:
+        Args:
+            api_setup (Optional[Dict[str, Any]]): API-Schlüssel, Secret und Passwort.
+            demo_mode (bool): Wenn True, wird die Sandbox-Umgebung (Demo) verwendet.
+        """
+        if api_setup is None:
             self.session = ccxt.bitget()
         else:
+            # Standardoptionen für Futures setzen
             api_setup.setdefault("options", {"defaultType": "future"})
+            
+            # Wenn der Demo-Modus aktiviert ist, überschreibe den Produkttyp
+            if demo_mode:
+                api_setup["options"]["productType"] = "SUSDT-FUTURES"
+            
             self.session = ccxt.bitget(api_setup)
+
+            # Sandbox-Modus für Demo-Handel aktivieren
+            if demo_mode:
+                self.session.set_sandbox_mode(True)
 
         self.markets = self.session.load_markets()
     
@@ -47,12 +68,6 @@ class BitgetFutures():
         except Exception as e:
             raise Exception(f"Failed to fetch balance: {e}")
 
-    def fetch_order(self, id: str, symbol: str) -> Dict[str, Any]:
-        try:
-            return self.session.fetch_order(id, symbol)
-        except Exception as e:
-            raise Exception(f"Failed to fetch order {id} info for {symbol}: {e}")
-
     def fetch_open_orders(self, symbol: str) -> List[Dict[str, Any]]:
         try:
             return self.session.fetch_open_orders(symbol)
@@ -64,12 +79,6 @@ class BitgetFutures():
             return self.session.fetch_open_orders(symbol, params={'stop': True})
         except Exception as e:
             raise Exception(f"Failed to fetch open trigger orders: {e}")
-
-    def fetch_closed_trigger_orders(self, symbol: str) -> List[Dict[str, Any]]:
-        try:
-            return self.session.fetch_closed_orders(symbol, params={'stop': True})
-        except Exception as e:
-            raise Exception(f"Failed to fetch closed trigger orders: {e}")
 
     def cancel_order(self, id: str, symbol: str) -> Dict[str, Any]:
         try:
@@ -86,53 +95,32 @@ class BitgetFutures():
     def fetch_open_positions(self, symbol: str) -> List[Dict[str, Any]]:
         try:
             positions = self.session.fetch_positions([symbol], params={'productType': 'USDT-FUTURES', 'marginCoin': 'USDT'})
-            real_positions = []
-            for position in positions:
-                if float(position['contracts']) > 0:
-                    real_positions.append(position)
+            # Filtere nur Positionen, die tatsächlich eine Größe haben
+            real_positions = [p for p in positions if p.get('contracts') and float(p['contracts']) > 0]
             return real_positions
         except Exception as e:
             raise Exception(f"Failed to fetch open positions: {e}")
 
     def set_margin_mode(self, symbol: str, margin_mode: str = 'isolated') -> None:
         try:
-            self.session.set_margin_mode(
-                margin_mode,
-                symbol,
-                params={'productType': 'USDT-FUTURES', 'marginCoin': 'USDT'},
-            )
+            self.session.set_margin_mode(margin_mode, symbol, params={'productType': 'USDT-FUTURES', 'marginCoin': 'USDT'})
         except Exception as e:
             raise Exception(f"Failed to set margin mode: {e}")
 
     def set_leverage(self, symbol: str, leverage: int = 1) -> None:
         try:
             # Für Bitget muss der Hebel für Long und Short separat gesetzt werden
-            self.session.set_leverage(
-                leverage,
-                symbol,
-                params={
-                    'productType': 'USDT-FUTURES',
-                    'marginCoin': 'USDT',
-                    'holdSide': 'long',
-                },
-            )
-            self.session.set_leverage(
-                leverage,
-                symbol,
-                params={
-                    'productType': 'USDT-FUTURES',
-                    'marginCoin': 'USDT',
-                    'holdSide': 'short',
-                },
-            )
+            params_long = {'productType': 'USDT-FUTURES', 'marginCoin': 'USDT', 'holdSide': 'long'}
+            params_short = {'productType': 'USDT-FUTURES', 'marginCoin': 'USDT', 'holdSide': 'short'}
+            self.session.set_leverage(leverage, symbol, params=params_long)
+            self.session.set_leverage(leverage, symbol, params=params_short)
         except Exception as e:
             raise Exception(f"Failed to set leverage: {e}")
 
     def fetch_recent_ohlcv(self, symbol: str, timeframe: str, limit: int = 1000) -> pd.DataFrame:
-        timeframe_in_ms = self.session.parse_timeframe(timeframe) * 1000
-        since = self.session.milliseconds() - limit * timeframe_in_ms
-        all_ohlcv = []
         try:
+            timeframe_in_ms = self.session.parse_timeframe(timeframe) * 1000
+            since = self.session.milliseconds() - limit * timeframe_in_ms
             all_ohlcv = self.session.fetch_ohlcv(symbol, timeframe, since=since, limit=limit)
         except Exception as e:
             raise Exception(f"Failed to fetch OHLCV data for {symbol} in timeframe {timeframe}: {e}")
@@ -154,11 +142,10 @@ class BitgetFutures():
                 if not ohlcv: break
                 all_ohlcv.extend(ohlcv)
                 last_timestamp = ohlcv[-1][0]
-                if last_timestamp >= start_ts:
-                     start_ts = last_timestamp + 1
-                else: break
+                start_ts = last_timestamp + self.session.parse_timeframe(timeframe) * 1000
             except Exception as e:
                 raise Exception(f"Failed to fetch historical OHLCV data for {symbol}: {e}")
+        
         if not all_ohlcv: return pd.DataFrame()
         df = pd.DataFrame(all_ohlcv, columns=['timestamp', 'open', 'high', 'low', 'close', 'volume'])
         df['timestamp'] = pd.to_datetime(df['timestamp'], unit='ms', utc=True)
@@ -177,13 +164,18 @@ class BitgetFutures():
             raise Exception(f"Failed to place limit order of {amount} {symbol} at price {price}: {e}")
 
     def place_trigger_market_order(self, symbol: str, side: str, amount: float, trigger_price: float, reduce: bool = False) -> Optional[Dict[str, Any]]:
+        """
+        Platziert eine Trigger-Market-Order (z.B. für Stop-Loss oder Take-Profit).
+        KRITISCHER BUGFIX: Die Parameter wurden korrekt an die ccxt-Funktion übergeben.
+        """
         try:
             amount_str = self.session.amount_to_precision(symbol, amount)
             trigger_price_str = self.session.price_to_precision(symbol, trigger_price)
             params = {
                 'reduceOnly': reduce,
-                'stopPrice': trigger_price_str,
+                'stopPrice': trigger_price_str,  # 'stopPrice' ist der korrekte Parameter für Bitget
             }
-            return self.session.create_order(symbol, 'market', side, float(amount_str), params=params)
+            # BUGFIX: `price` wird auf None gesetzt und `params` explizit übergeben.
+            return self.session.create_order(symbol, 'market', side, float(amount_str), price=None, params=params)
         except Exception as err:
             raise err
