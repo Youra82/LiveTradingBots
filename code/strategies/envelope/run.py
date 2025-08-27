@@ -1,10 +1,12 @@
+# code/strategies/envelope/run.py
+
 import os
 import sys
 import json
-from datetime import datetime
 import logging
 import pandas as pd
 import traceback
+import sqlite3
 
 # Passe den Pfad an, um die Utilities zu finden
 PROJECT_ROOT = os.path.join(os.path.dirname(__file__), '..', '..', '..')
@@ -28,105 +30,135 @@ def load_config():
         return json.load(f)
 
 params = load_config()
+SYMBOL = params['market']['symbol']
 
-# --- Authentifizierung & Initialisierung ---
-logger.info(f">>> Starte Ausführung für {params['market']['symbol']}")
-try:
-    key_path = os.path.abspath(os.path.join(PROJECT_ROOT, 'secret.json'))
-    with open(key_path, "r") as f:
-        secrets = json.load(f)
-    api_setup = secrets['envelope']
-    telegram_config = secrets.get('telegram', {})
-except Exception as e:
-    logger.critical(f"Fehler beim Laden der API-Schlüssel: {e}")
-    sys.exit(1)
+# --- SQLite Datenbank-Setup ---
+DB_FILE = os.path.join(os.path.dirname(__file__), f"bot_state_{SYMBOL.replace('/', '-')}.db")
 
-bitget = BitgetFutures(api_setup)
-tracker_file = os.path.join(os.path.dirname(__file__), f"tracker_{params['market']['symbol'].replace('/', '-')}.json")
+def setup_database():
+    """Erstellt die Datenbank und die Tabelle, falls sie nicht existieren."""
+    conn = sqlite3.connect(DB_FILE)
+    cursor = conn.cursor()
+    cursor.execute('''
+        CREATE TABLE IF NOT EXISTS bot_state (
+            symbol TEXT PRIMARY KEY,
+            status TEXT NOT NULL,
+            last_side TEXT
+        )
+    ''')
+    # Füge einen Standardeintrag für das Symbol hinzu, falls noch keiner existiert
+    cursor.execute("INSERT OR IGNORE INTO bot_state (symbol, status, last_side) VALUES (?, ?, ?)",
+                   (SYMBOL, 'ok_to_trade', None))
+    conn.commit()
+    conn.close()
 
-# --- Tracker-Funktionen ---
-if not os.path.exists(tracker_file):
-    with open(tracker_file, 'w') as file:
-        json.dump({"status": "ok_to_trade", "last_side": None}, file)
+def get_bot_status():
+    """Liest den aktuellen Status des Bots aus der SQLite-Datenbank."""
+    conn = sqlite3.connect(DB_FILE)
+    cursor = conn.cursor()
+    cursor.execute("SELECT status, last_side FROM bot_state WHERE symbol = ?", (SYMBOL,))
+    result = cursor.fetchone()
+    conn.close()
+    if result:
+        return {"status": result[0], "last_side": result[1]}
+    return {"status": "ok_to_trade", "last_side": None} # Fallback
 
-def read_tracker_file(file_path):
-    with open(file_path, 'r') as file:
-        return json.load(file)
+def update_bot_status(status: str, last_side: str = None):
+    """Aktualisiert den Status des Bots in der SQLite-Datenbank."""
+    conn = sqlite3.connect(DB_FILE)
+    cursor = conn.cursor()
+    cursor.execute("UPDATE bot_state SET status = ?, last_side = ? WHERE symbol = ?",
+                   (status, last_side, SYMBOL))
+    conn.commit()
+    conn.close()
 
-def update_tracker_file(file_path, data):
-    with open(file_path, 'w') as file:
-        json.dump(data, file)
-
+# --- Hauptlogik ---
 def main():
-    bot_token = telegram_config.get('bot_token')
-    chat_id = telegram_config.get('chat_id')
-    symbol = params['market']['symbol']
+    logger.info(f">>> Starte Ausführung für {SYMBOL}")
     
-    send_telegram_message(bot_token, chat_id, f"🤖 Bot für *{symbol}* gestartet.")
+    # --- Authentifizierung & Initialisierung ---
+    try:
+        key_path = os.path.abspath(os.path.join(PROJECT_ROOT, 'secret.json'))
+        with open(key_path, "r") as f:
+            secrets = json.load(f)
+        api_setup = secrets['envelope']
+        telegram_config = secrets.get('telegram', {})
+        bot_token = telegram_config.get('bot_token')
+        chat_id = telegram_config.get('chat_id')
+    except Exception as e:
+        logger.critical(f"Fehler beim Laden der API-Schlüssel: {e}")
+        sys.exit(1)
+
+    bitget = BitgetFutures(api_setup)
+    setup_database() # Stellt sicher, dass die DB bereit ist
+    
+    send_telegram_message(bot_token, chat_id, f"🤖 Bot für *{SYMBOL}* gestartet.")
     
     try:
         timeframe = params['market']['timeframe']
         
         # --- BEREINIGUNG & DATENLADEN ---
         logger.info("Storniere alte Limit-Orders...")
-        orders = bitget.fetch_open_orders(symbol)
-        for order in orders: 
-            bitget.cancel_order(order['id'], symbol)
+        orders = bitget.fetch_open_orders(SYMBOL)
+        for order in orders:  
+            bitget.cancel_order(order['id'], SYMBOL)
 
         logger.info("Lade Marktdaten...")
-        data = bitget.fetch_recent_ohlcv(symbol, timeframe, 200)
-        
+        data = bitget.fetch_recent_ohlcv(SYMBOL, timeframe, 200)
         data = calculate_envelope_indicators(data, {**params['strategy'], **params['risk']})
         latest_complete_candle = data.iloc[-2]
         logger.info("Indikatoren berechnet.")
 
         # --- POSITIONS- & STATUS-CHECKS ---
-        tracker_info_before = read_tracker_file(tracker_file)
-        positions = bitget.fetch_open_positions(symbol)
+        tracker_info_before = get_bot_status()
+        positions = bitget.fetch_open_positions(SYMBOL)
         open_position = positions[0] if positions else None
 
         if open_position is None and tracker_info_before['status'] == 'in_trade':
             side = tracker_info_before.get('last_side', 'Unbekannt')
-            message = f"✅ Position für *{symbol}* ({side}) wurde geschlossen."
+            message = f"✅ Position für *{SYMBOL}* ({side}) wurde geschlossen."
             send_telegram_message(bot_token, chat_id, message)
             logger.info(message)
+            # Status wird erst zurückgesetzt, wenn der Preis zum Mittelwert zurückkehrt
 
         if open_position is None and tracker_info_before['status'] != "ok_to_trade":
             last_price = latest_complete_candle['close']
             resume_price = latest_complete_candle['average']
-            if ('long' in tracker_info_before.get('last_side', '') and last_price >= resume_price) or \
-               ('short' in tracker_info_before.get('last_side', '') and last_price <= resume_price):
-                logger.info(f"Status wird auf 'ok_to_trade' zurückgesetzt.")
-                update_tracker_file(tracker_file, {"status": "ok_to_trade", "last_side": tracker_info_before.get('last_side')})
+            if ('long' in str(tracker_info_before.get('last_side')) and last_price >= resume_price) or \
+               ('short' in str(tracker_info_before.get('last_side')) and last_price <= resume_price):
+                logger.info(f"Preis ist zum Mittelwert zurückgekehrt. Status wird auf 'ok_to_trade' zurückgesetzt.")
+                update_bot_status("ok_to_trade", tracker_info_before.get('last_side'))
             else:
                 logger.info(f"Status ist '{tracker_info_before['status']}'. Warte auf Rückkehr zum Mittelwert.")
                 return
 
-        tracker_info = read_tracker_file(tracker_file)
+        tracker_info = get_bot_status()
 
         # --- TRADING LOGIK ---
         if open_position:
             logger.info(f"{open_position['side']} Position ist offen. Verwalte Take-Profit und Stop-Loss.")
             side = open_position['side']
             close_side = 'sell' if side == 'long' else 'buy'
-            amount = open_position['contracts']
+            amount = float(open_position['contracts'])
             avg_entry = float(open_position['entryPrice'])
             
-            trigger_orders = bitget.fetch_open_trigger_orders(symbol)
+            # Bestehende TP/SL-Orders löschen, um sie neu zu setzen
+            trigger_orders = bitget.fetch_open_trigger_orders(SYMBOL)
             for order in trigger_orders:
-                bitget.cancel_trigger_order(order['id'], symbol)
+                bitget.cancel_trigger_order(order['id'], SYMBOL)
             
             sl_price = avg_entry * (1 - params['risk']['stop_loss_pct']/100) if side == 'long' else avg_entry * (1 + params['risk']['stop_loss_pct']/100)
             tp_price = latest_complete_candle['average']
 
-            bitget.place_trigger_market_order(symbol, close_side, amount, tp_price, reduce=True)
-            bitget.place_trigger_market_order(symbol, close_side, amount, sl_price, reduce=True)
-            update_tracker_file(tracker_file, {"status": "in_trade", "last_side": side})
+            bitget.place_trigger_market_order(SYMBOL, close_side, amount, tp_price, reduce=True)
+            bitget.place_trigger_market_order(SYMBOL, close_side, amount, sl_price, reduce=True)
+            update_bot_status("in_trade", side)
             logger.info(f"TP-Order @{tp_price:.4f} und SL-Order @{sl_price:.4f} platziert/aktualisiert.")
 
         elif tracker_info['status'] == "ok_to_trade":
             logger.info("Keine Position offen, prüfe auf neue Einstiege.")
             
+            # Dynamischen Hebel berechnen
             base_leverage = params['risk']['base_leverage']
             target_atr_pct = params['risk']['target_atr_pct']
             max_leverage = params['risk']['max_leverage']
@@ -140,10 +172,10 @@ def main():
             
             logger.info(f"Aktueller ATR: {current_atr_pct:.2f}%. Ziel-ATR: {target_atr_pct}%. Berechneter Hebel: {leverage}x")
 
-            bitget.set_margin_mode(symbol, margin_mode=params['risk']['margin_mode'])
-            bitget.set_leverage(symbol, leverage=leverage)
+            bitget.set_margin_mode(SYMBOL, margin_mode=params['risk']['margin_mode'])
+            bitget.set_leverage(SYMBOL, leverage=leverage)
             
-            # FINALE, KORRIGIERTE KAPITALBERECHNUNG
+            # Kapitalberechnung
             free_balance = bitget.fetch_balance()['USDT']['free']
             capital_to_use = free_balance * (params['risk']['balance_fraction_pct'] / 100.0)
             
@@ -152,34 +184,29 @@ def main():
                 logger.warning("Keine 'envelopes_pct' in der Konfiguration gefunden.")
                 return
             
-            num_sides = (1 if params['behavior'].get('use_longs', False) else 0) + \
-                        (1 if params['behavior'].get('use_shorts', False) else 0)
-            if num_sides == 0: return
-
-            total_orders_to_place = num_grids * num_sides
-            capital_per_order = capital_to_use / total_orders_to_place
-            notional_amount_per_order = capital_per_order * leverage
+            # Grid-Orders platzieren
+            notional_amount_per_order = (capital_to_use / num_grids) * leverage
             
-            message = f"📈 Neue Grid-Orders für *{symbol}* platziert.\n- Hebel: {leverage}x"
+            message = f"📈 Neue Grid-Orders für *{SYMBOL}* platziert.\n- Hebel: {leverage}x"
             send_telegram_message(bot_token, chat_id, message)
             
             if params['behavior'].get('use_longs', True):
                 for i in range(num_grids):
                     entry_price = latest_complete_candle[f'band_low_{i + 1}']
                     amount = notional_amount_per_order / entry_price
-                    bitget.place_limit_order(symbol, 'buy', amount, entry_price)
+                    bitget.place_limit_order(SYMBOL, 'buy', amount, entry_price)
                     logger.info(f"Platziere Long-Grid {i+1}: Entry @{entry_price:.4f}")
 
             if params['behavior'].get('use_shorts', True):
                 for i in range(num_grids):
                     entry_price = latest_complete_candle[f'band_high_{i + 1}']
                     amount = notional_amount_per_order / entry_price
-                    bitget.place_limit_order(symbol, 'sell', amount, entry_price)
+                    bitget.place_limit_order(SYMBOL, 'sell', amount, entry_price)
                     logger.info(f"Platziere Short-Grid {i+1}: Entry @{entry_price:.4f}")
 
     except Exception as e:
         logger.error(f"Ein unerwarteter Fehler ist aufgetreten: {e}", exc_info=True)
-        error_message = f"🚨 KRITISCHER FEHLER im Bot für *{symbol}*!\n\n`{traceback.format_exc()}`"
+        error_message = f"🚨 KRITISCHER FEHLER im Bot für *{SYMBOL}*!\n\n`{traceback.format_exc()}`"
         if len(error_message) > 4000:
             error_message = error_message[:4000] + "..."
         send_telegram_message(bot_token, chat_id, error_message)
