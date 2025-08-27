@@ -64,16 +64,18 @@ def run_envelope_backtest(data, params):
     for i in range(1, len(data)):
         current_candle = data.iloc[i]
         
+        # --- AUSSTIEGSLOGIK ---
         if open_positions:
             avg_entry_price = np.mean([p['entry_price'] for p in open_positions])
             total_amount = sum([p['amount'] for p in open_positions])
             side = open_positions[0]['side']
             avg_leverage = np.mean([p['leverage'] for p in open_positions])
 
+            # Stop-Loss-Prüfung
             sl_price = avg_entry_price * (1 - stop_loss_pct) if side == 'long' else avg_entry_price * (1 + stop_loss_pct)
             if (side == 'long' and current_candle['low'] <= sl_price) or (side == 'short' and current_candle['high'] >= sl_price):
                 pnl = (sl_price - avg_entry_price) * total_amount if side == 'long' else (avg_entry_price - sl_price) * total_amount
-                pnl -= (avg_entry_price * total_amount) * fee_pct
+                pnl -= (avg_entry_price * total_amount) * fee_pct # Gebühr abziehen
                 current_capital += pnl
                 trades_count += 1
                 trade_log.append({
@@ -82,11 +84,12 @@ def run_envelope_backtest(data, params):
                 })
                 open_positions = []
 
+            # Take-Profit-Prüfung (Rückkehr zum Durchschnitt)
             tp_price = current_candle['average']
             if not open_positions: pass
             elif (side == 'long' and current_candle['high'] >= tp_price) or (side == 'short' and current_candle['low'] <= tp_price):
                 pnl = (tp_price - avg_entry_price) * total_amount if side == 'long' else (avg_entry_price - tp_price) * total_amount
-                pnl -= (avg_entry_price * total_amount) * fee_pct
+                pnl -= (avg_entry_price * total_amount) * fee_pct # Gebühr abziehen
                 current_capital += pnl
                 trades_count += 1
                 wins_count += 1
@@ -96,6 +99,7 @@ def run_envelope_backtest(data, params):
                 })
                 open_positions = []
 
+            # Nach einem Trade-Abschluss, Drawdown aktualisieren und zur nächsten Kerze springen
             if not open_positions:
                 if current_capital <= 0: current_capital = 0
                 peak_capital = max(peak_capital, current_capital)
@@ -104,6 +108,7 @@ def run_envelope_backtest(data, params):
                 if current_capital == 0: break
                 continue
 
+        # --- EINSTIEGSLOGIK ---
         if not open_positions:
             current_atr_pct = current_candle['atr_pct']
             leverage = base_leverage
@@ -112,17 +117,21 @@ def run_envelope_backtest(data, params):
             
             leverage = int(round(max(1.0, min(leverage, max_leverage))))
 
+            # Long-Einstiege prüfen
             for j, e_pct in enumerate(envelopes):
                 band_low = current_candle[f'band_low_{j+1}']
                 if current_candle['low'] <= band_low:
                     amount = (current_capital * balance_fraction / len(envelopes)) * leverage / band_low
                     open_positions.append({'side': 'long', 'entry_price': band_low, 'amount': amount, 'leverage': leverage})
 
-            for j, e_pct in enumerate(envelopes):
-                band_high = current_candle[f'band_high_{j+1}']
-                if current_candle['high'] >= band_high:
-                    amount = (current_capital * balance_fraction / len(envelopes)) * leverage / band_high
-                    open_positions.append({'side': 'short', 'entry_price': band_high, 'amount': amount, 'leverage': leverage})
+            # BUGFIX: Short-Einstiege nur prüfen, wenn keine Long-Position eröffnet wurde.
+            # Dies verhindert das gleichzeitige Eröffnen von Long- und Short-Positionen.
+            if not open_positions:
+                for j, e_pct in enumerate(envelopes):
+                    band_high = current_candle[f'band_high_{j+1}']
+                    if current_candle['high'] >= band_high:
+                        amount = (current_capital * balance_fraction / len(envelopes)) * leverage / band_high
+                        open_positions.append({'side': 'short', 'entry_price': band_high, 'amount': amount, 'leverage': leverage})
 
     win_rate = (wins_count / trades_count * 100) if trades_count > 0 else 0
     final_pnl_pct = ((current_capital / start_capital) - 1) * 100
