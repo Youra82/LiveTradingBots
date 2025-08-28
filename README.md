@@ -27,7 +27,7 @@ Cache vom Optimizer löschen:
 
 Abfrage der letzten Trading-Entscheidungen:
 
-> grep "TRADE_DECISION:" /home/ubuntu/LiveTradingBots/logs/envelope.log | tail -n 20
+> tail -n 50 logs/livetradingbot.log
 
 Crontab -e jobs ansehen:
 > grep CRON /var/log/syslog | tail -n 20
