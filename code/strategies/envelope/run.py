@@ -98,10 +98,17 @@ def main():
         timeframe = params['market']['timeframe']
         
         # --- BEREINIGUNG & DATENLADEN ---
+        # KORREKTUR: Jetzt werden BEIDE Ordertypen (Limit und Trigger) storniert.
         logger.info("Storniere alte Limit-Orders...")
         orders = bitget.fetch_open_orders(SYMBOL)
         for order in orders:  
             bitget.cancel_order(order['id'], SYMBOL)
+
+        logger.info("Storniere alte Trigger-Orders (TP/SL)...")
+        trigger_orders = bitget.fetch_open_trigger_orders(SYMBOL)
+        for order in trigger_orders:
+            bitget.cancel_trigger_order(order['id'], SYMBOL)
+        # ENDE DER KORREKTUR
 
         logger.info("Lade Marktdaten...")
         data = bitget.fetch_recent_ohlcv(SYMBOL, timeframe, 200)
