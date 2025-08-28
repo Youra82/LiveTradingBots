@@ -80,7 +80,8 @@ def main():
     bitget = BitgetFutures(api_setup)
     setup_database()
     
-    send_telegram_message(bot_token, chat_id, f"🤖 Bot für *{SYMBOL}* gestartet.")
+    # Die Start-Nachricht wird beibehalten, um zu wissen, dass der Bot läuft.
+    send_telegram_message(bot_token, chat_id, f"🤖 Bot-Lauf für *{SYMBOL}* gestartet.")
     
     try:
         timeframe = params['market']['timeframe']
@@ -105,9 +106,19 @@ def main():
         positions = bitget.fetch_open_positions(SYMBOL)
         open_position = positions[0] if positions else None
 
+        # --- TEIL 1: ÄNDERUNG - NACHRICHT BEI POSITIONSSCHLIESSUNG ---
         if open_position is None and tracker_info_before['status'] == 'in_trade':
             side = tracker_info_before.get('last_side', 'Unbekannt')
-            message = f"✅ Position für *{SYMBOL}* ({side}) wurde geschlossen."
+            last_price = latest_complete_candle['close']
+            resume_price = latest_complete_candle['average']
+            
+            # Logik, um zwischen TP und SL zu unterscheiden
+            reason = "Stop-Loss / Manuell"
+            if (side == 'long' and last_price >= resume_price) or \
+               (side == 'short' and last_price <= resume_price):
+                reason = "Take-Profit"
+                
+            message = f"✅ Position für *{SYMBOL}* ({side}) geschlossen.\n- Grund: {reason}"
             send_telegram_message(bot_token, chat_id, message)
             logger.info(message)
 
@@ -125,8 +136,20 @@ def main():
         tracker_info = get_bot_status()
 
         if open_position:
-            logger.info(f"{open_position['side']} Position ist offen. Verwalte Take-Profit und Stop-Loss.")
             side = open_position['side']
+            
+            # --- TEIL 2: NEU - NACHRICHT BEI POSITIONSERÖFFNUNG ---
+            # Diese Bedingung ist nur wahr, wenn eine Position existiert, der Status in der DB aber noch 'ok_to_trade' ist.
+            # Das passiert nur im ersten Bot-Lauf, nachdem eine Order gefüllt wurde.
+            if tracker_info['status'] == 'ok_to_trade':
+                entry_price = float(open_position['entryPrice'])
+                contracts = float(open_position['contracts'])
+                leverage = float(open_position['leverage'])
+                message = f"🔥 Position für *{SYMBOL}* eröffnet!\n- Seite: {side.upper()}\n- Einstieg: ${entry_price:.4f}\n- Menge: {contracts} {SYMBOL.split('/')[0]}\n- Hebel: {int(leverage)}x"
+                send_telegram_message(bot_token, chat_id, message)
+                logger.info(message)
+            
+            logger.info(f"{side} Position ist offen. Verwalte Take-Profit und Stop-Loss.")
             close_side = 'sell' if side == 'long' else 'buy'
             amount = float(open_position['contracts'])
             avg_entry = float(open_position['entryPrice'])
@@ -140,7 +163,7 @@ def main():
 
             bitget.place_trigger_market_order(SYMBOL, close_side, amount, tp_price, reduce=True)
             bitget.place_trigger_market_order(SYMBOL, close_side, amount, sl_price, reduce=True)
-            update_bot_status("in_trade", side)
+            update_bot_status("in_trade", side) # Wichtig: Status erst nach der Nachricht aktualisieren
             logger.info(f"TP-Order @{tp_price:.4f} und SL-Order @{sl_price:.4f} platziert/aktualisiert.")
 
         elif tracker_info['status'] == "ok_to_trade":
@@ -178,14 +201,14 @@ def main():
             capital_per_side = capital_to_use / num_sides_active
             notional_amount_per_order = (capital_per_side / num_grids) * leverage
             
-            message = f"📈 Neue Grid-Orders für *{SYMBOL}* platziert.\n- Hebel: {leverage}x\n- Modus: {margin_mode}"
-            send_telegram_message(bot_token, chat_id, message)
+            # --- TEIL 3: ENTFERNT - Die alte Nachricht wird hier nicht mehr gesendet ---
+            # message = f"📈 Neue Grid-Orders für *{SYMBOL}* platziert..."
+            # send_telegram_message(bot_token, chat_id, message)
             
             if params['behavior'].get('use_longs', True):
                 for i in range(num_grids):
                     entry_price = latest_complete_candle[f'band_low_{i + 1}']
                     amount = notional_amount_per_order / entry_price
-                    # Hebel und Modus werden hier direkt mitgegeben
                     bitget.place_limit_order(SYMBOL, 'buy', amount, entry_price, leverage=leverage, margin_mode=margin_mode)
                     logger.info(f"Platziere Long-Grid {i+1}: Entry @{entry_price:.4f}")
 
@@ -193,7 +216,6 @@ def main():
                 for i in range(num_grids):
                     entry_price = latest_complete_candle[f'band_high_{i + 1}']
                     amount = notional_amount_per_order / entry_price
-                    # Hebel und Modus werden hier direkt mitgegeben
                     bitget.place_limit_order(SYMBOL, 'sell', amount, entry_price, leverage=leverage, margin_mode=margin_mode)
                     logger.info(f"Platziere Short-Grid {i+1}: Entry @{entry_price:.4f}")
 
