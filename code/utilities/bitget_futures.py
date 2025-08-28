@@ -3,37 +3,22 @@
 import ccxt
 import time
 import pandas as pd
+import logging
 from typing import Any, Optional, Dict, List
 
-class BitgetFutures():
-    """
-    Eine vereinheitlichte Klasse zur Interaktion mit der Bitget Futures API.
-    Unterstützt sowohl den Live- als auch den Demo-Handel über den `demo_mode`-Parameter.
-    """
-    def __init__(self, api_setup: Optional[Dict[str, Any]] = None, demo_mode: bool = False) -> None:
-        """
-        Initialisiert die Bitget-Sitzung.
+logger = logging.getLogger(__name__)
 
-        Args:
-            api_setup (Optional[Dict[str, Any]]): API-Schlüssel, Secret und Passwort.
-            demo_mode (bool): Wenn True, wird die Sandbox-Umgebung (Demo) verwendet.
-        """
+class BitgetFutures():
+    def __init__(self, api_setup: Optional[Dict[str, Any]] = None, demo_mode: bool = False) -> None:
         if api_setup is None:
             self.session = ccxt.bitget()
         else:
-            # Standardoptionen für Futures setzen
             api_setup.setdefault("options", {"defaultType": "future"})
-            
-            # Wenn der Demo-Modus aktiviert ist, überschreibe den Produkttyp
             if demo_mode:
                 api_setup["options"]["productType"] = "SUSDT-FUTURES"
-            
             self.session = ccxt.bitget(api_setup)
-
-            # Sandbox-Modus für Demo-Handel aktivieren
             if demo_mode:
                 self.session.set_sandbox_mode(True)
-
         self.markets = self.session.load_markets()
     
     def fetch_ticker(self, symbol: str) -> Dict[str, Any]:
@@ -46,7 +31,7 @@ class BitgetFutures():
         try:
             return self.markets[symbol]['limits']['amount']['min']
         except Exception as e:
-            raise Exception(f"Failed to fetch minimum amount tradable: {e}")      
+            raise Exception(f"Failed to fetch minimum amount tradable: {e}")    
         
     def amount_to_precision(self, symbol: str, amount: float) -> str:
         try:
@@ -95,27 +80,16 @@ class BitgetFutures():
     def fetch_open_positions(self, symbol: str) -> List[Dict[str, Any]]:
         try:
             positions = self.session.fetch_positions([symbol], params={'productType': 'USDT-FUTURES', 'marginCoin': 'USDT'})
-            # Filtere nur Positionen, die tatsächlich eine Größe haben
             real_positions = [p for p in positions if p.get('contracts') and float(p['contracts']) > 0]
             return real_positions
         except Exception as e:
             raise Exception(f"Failed to fetch open positions: {e}")
 
     def set_margin_mode(self, symbol: str, margin_mode: str = 'isolated') -> None:
-        try:
-            self.session.set_margin_mode(margin_mode, symbol, params={'productType': 'USDT-FUTURES', 'marginCoin': 'USDT'})
-        except Exception as e:
-            raise Exception(f"Failed to set margin mode: {e}")
+        pass
 
-    def set_leverage(self, symbol: str, leverage: int = 1) -> None:
-        try:
-            # Für Bitget muss der Hebel für Long und Short separat gesetzt werden
-            params_long = {'productType': 'USDT-FUTURES', 'marginCoin': 'USDT', 'holdSide': 'long'}
-            params_short = {'productType': 'USDT-FUTURES', 'marginCoin': 'USDT', 'holdSide': 'short'}
-            self.session.set_leverage(leverage, symbol, params=params_long)
-            self.session.set_leverage(leverage, symbol, params=params_short)
-        except Exception as e:
-            raise Exception(f"Failed to set leverage: {e}")
+    def set_leverage(self, symbol: str, leverage: int, margin_mode: str) -> None:
+        pass
 
     def fetch_recent_ohlcv(self, symbol: str, timeframe: str, limit: int = 1000) -> pd.DataFrame:
         try:
@@ -153,29 +127,32 @@ class BitgetFutures():
         df = df[~df.index.duplicated(keep='first')]
         df.sort_index(inplace=True)
         return df
-
-    def place_limit_order(self, symbol: str, side: str, amount: float, price: float, reduce: bool = False) -> Dict[str, Any]:
+    
+    def place_limit_order(self, symbol: str, side: str, amount: float, price: float, leverage: int, margin_mode: str, reduce: bool = False) -> Dict[str, Any]:
         try:
-            params = {'reduceOnly': reduce}
+            params = {
+                'reduceOnly': reduce,
+                'leverage': leverage,
+                'marginMode': margin_mode
+            }
             amount_str = self.session.amount_to_precision(symbol, amount)
             price_str = self.session.price_to_precision(symbol, price)
-            return self.session.create_order(symbol, 'limit', side, float(amount_str), float(price_str), params=params)
+            
+            logger.info(f"DIAGNOSE: Sende Order: {symbol}, {side}, {amount_str}, {price_str} mit Params: {params}")
+            response = self.session.create_order(symbol, 'limit', side, float(amount_str), float(price_str), params=params)
+            logger.info(f"DIAGNOSE: Antwort von create_order: {response}")
+            return response
         except Exception as e:
             raise Exception(f"Failed to place limit order of {amount} {symbol} at price {price}: {e}")
 
     def place_trigger_market_order(self, symbol: str, side: str, amount: float, trigger_price: float, reduce: bool = False) -> Optional[Dict[str, Any]]:
-        """
-        Platziert eine Trigger-Market-Order (z.B. für Stop-Loss oder Take-Profit).
-        KRITISCHER BUGFIX: Die Parameter wurden korrekt an die ccxt-Funktion übergeben.
-        """
         try:
             amount_str = self.session.amount_to_precision(symbol, amount)
             trigger_price_str = self.session.price_to_precision(symbol, trigger_price)
             params = {
                 'reduceOnly': reduce,
-                'stopPrice': trigger_price_str,  # 'stopPrice' ist der korrekte Parameter für Bitget
+                'stopPrice': trigger_price_str,
             }
-            # BUGFIX: `price` wird auf None gesetzt und `params` explizit übergeben.
             return self.session.create_order(symbol, 'market', side, float(amount_str), price=None, params=params)
         except Exception as err:
             raise err
