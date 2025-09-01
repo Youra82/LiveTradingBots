@@ -43,6 +43,8 @@ Eventuell neue Requireries nach Update installieren:
 
 >pip install -r requirements.txt
 
+>deactivate
+
 
 
 \
