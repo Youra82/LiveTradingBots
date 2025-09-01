@@ -11,8 +11,8 @@ _A homemade humble library to run automated python crypto trading bots_
 Botausführung:
 > bash LiveTradingBots/code/run_envelope.sh
 
-Monitorinstallation:
-> chmod +x run_genetic_optimizer.sh
+Optimizeraktivierung:
+> chmod +x run_optimization_pipeline.sh
 
 Monitorabfrage:
 > ./monitor_bot.sh
