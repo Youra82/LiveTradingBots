@@ -64,32 +64,30 @@ def run_envelope_backtest(data, params):
     for i in range(1, len(data)):
         current_candle = data.iloc[i]
         
-        # --- AUSSTIEGSLOGIK ---
         if open_positions:
             avg_entry_price = np.mean([p['entry_price'] for p in open_positions])
             total_amount = sum([p['amount'] for p in open_positions])
             side = open_positions[0]['side']
             avg_leverage = np.mean([p['leverage'] for p in open_positions])
 
+            # <<< ANPASSUNG HIER START >>>
+            # SL und TP Preise für das Logging definieren
+            sl_price = avg_entry_price * (1 - stop_loss_pct) if side == 'long' else avg_entry_price * (1 + stop_loss_pct)
+            tp_price = current_candle['average']
             exit_price = None
             reason = None
+            # <<< ANPASSUNG HIER ENDE >>>
 
-            # Stop-Loss-Prüfung
-            sl_price = avg_entry_price * (1 - stop_loss_pct) if side == 'long' else avg_entry_price * (1 + stop_loss_pct)
             if (side == 'long' and current_candle['low'] <= sl_price) or (side == 'short' and current_candle['high'] >= sl_price):
                 exit_price = sl_price
                 reason = "Stop-Loss"
 
-            # Take-Profit-Prüfung (Rückkehr zum Durchschnitt)
-            tp_price = current_candle['average']
             if not exit_price and ((side == 'long' and current_candle['high'] >= tp_price) or (side == 'short' and current_candle['low'] <= tp_price)):
                 exit_price = tp_price
                 reason = "Take-Profit"
 
             if exit_price is not None:
                 pnl = (exit_price - avg_entry_price) * total_amount if side == 'long' else (avg_entry_price - exit_price) * total_amount
-                
-                # KORREKTUR: Gebühren für Einstieg UND Ausstieg berechnen für mehr Realismus
                 entry_value = avg_entry_price * total_amount
                 exit_value = exit_price * total_amount
                 total_fees = (entry_value * fee_pct) + (exit_value * fee_pct)
@@ -97,16 +95,17 @@ def run_envelope_backtest(data, params):
                 
                 current_capital += pnl
                 trades_count += 1
-                if reason == "Take-Profit":
-                    wins_count += 1
+                if reason == "Take-Profit": wins_count += 1
                 
+                # <<< ANPASSUNG HIER START >>>
                 trade_log.append({
                     "timestamp": str(current_candle.name), "side": side, "entry": avg_entry_price, 
-                    "exit": exit_price, "pnl": pnl, "balance": current_capital, "reason": reason, "leverage": avg_leverage
+                    "exit": exit_price, "pnl": pnl, "balance": current_capital, "reason": reason, 
+                    "leverage": avg_leverage, "stop_loss_price": sl_price, "take_profit_price": tp_price
                 })
+                # <<< ANPASSUNG HIER ENDE >>>
                 open_positions = []
 
-            # Nach einem Trade-Abschluss, Drawdown aktualisieren und zur nächsten Kerze springen
             if not open_positions:
                 if current_capital <= 0: current_capital = 0
                 peak_capital = max(peak_capital, current_capital)
@@ -115,7 +114,6 @@ def run_envelope_backtest(data, params):
                 if current_capital == 0: break
                 continue
 
-        # --- EINSTIEGSLOGIK ---
         if not open_positions:
             current_atr_pct = current_candle['atr_pct']
             leverage = base_leverage
@@ -124,14 +122,12 @@ def run_envelope_backtest(data, params):
             
             leverage = int(round(max(1.0, min(leverage, max_leverage))))
 
-            # Long-Einstiege prüfen
             for j, e_pct in enumerate(envelopes):
                 band_low = current_candle[f'band_low_{j+1}']
                 if current_candle['low'] <= band_low:
                     amount = (current_capital * balance_fraction / len(envelopes)) * leverage / band_low
                     open_positions.append({'side': 'long', 'entry_price': band_low, 'amount': amount, 'leverage': leverage})
 
-            # Short-Einstiege nur prüfen, wenn keine Long-Position eröffnet wurde.
             if not open_positions:
                 for j, e_pct in enumerate(envelopes):
                     band_high = current_candle[f'band_high_{j+1}']
