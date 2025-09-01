@@ -14,12 +14,10 @@ Botausführung:
 Optimizeraktivierung:
 > chmod +x run_optimization_pipeline.sh
 
-Monitorabfrage:
-> ./monitor_bot.sh
 
 Backtest & Optimizer benutzen
 
-> ./run_genetic_optimizer.sh
+> ./run_optimization_pipeline.sh
 
 Cache vom Optimizer löschen:
 > bash run_genetic_optimizer.sh clear-cache
