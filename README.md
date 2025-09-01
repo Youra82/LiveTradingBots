@@ -20,7 +20,7 @@ Backtest & Optimizer benutzen
 > ./run_optimization_pipeline.sh
 
 Cache vom Optimizer löschen:
-> bash run_genetic_optimizer.sh clear-cache
+> ./run_optimization_pipeline.sh clear-cache
 
 Abfrage der letzten Trading-Entscheidungen:
 
