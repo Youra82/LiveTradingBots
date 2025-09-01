@@ -71,31 +71,38 @@ def run_envelope_backtest(data, params):
             side = open_positions[0]['side']
             avg_leverage = np.mean([p['leverage'] for p in open_positions])
 
+            exit_price = None
+            reason = None
+
             # Stop-Loss-Prüfung
             sl_price = avg_entry_price * (1 - stop_loss_pct) if side == 'long' else avg_entry_price * (1 + stop_loss_pct)
             if (side == 'long' and current_candle['low'] <= sl_price) or (side == 'short' and current_candle['high'] >= sl_price):
-                pnl = (sl_price - avg_entry_price) * total_amount if side == 'long' else (avg_entry_price - sl_price) * total_amount
-                pnl -= (avg_entry_price * total_amount) * fee_pct # Gebühr abziehen
-                current_capital += pnl
-                trades_count += 1
-                trade_log.append({
-                    "timestamp": str(current_candle.name), "side": side, "entry": avg_entry_price, 
-                    "exit": sl_price, "pnl": pnl, "balance": current_capital, "reason": "Stop-Loss", "leverage": avg_leverage
-                })
-                open_positions = []
+                exit_price = sl_price
+                reason = "Stop-Loss"
 
             # Take-Profit-Prüfung (Rückkehr zum Durchschnitt)
             tp_price = current_candle['average']
-            if not open_positions: pass
-            elif (side == 'long' and current_candle['high'] >= tp_price) or (side == 'short' and current_candle['low'] <= tp_price):
-                pnl = (tp_price - avg_entry_price) * total_amount if side == 'long' else (avg_entry_price - tp_price) * total_amount
-                pnl -= (avg_entry_price * total_amount) * fee_pct # Gebühr abziehen
+            if not exit_price and ((side == 'long' and current_candle['high'] >= tp_price) or (side == 'short' and current_candle['low'] <= tp_price)):
+                exit_price = tp_price
+                reason = "Take-Profit"
+
+            if exit_price is not None:
+                pnl = (exit_price - avg_entry_price) * total_amount if side == 'long' else (avg_entry_price - exit_price) * total_amount
+                
+                # KORREKTUR: Gebühren für Einstieg UND Ausstieg berechnen für mehr Realismus
+                entry_value = avg_entry_price * total_amount
+                exit_value = exit_price * total_amount
+                total_fees = (entry_value * fee_pct) + (exit_value * fee_pct)
+                pnl -= total_fees
+                
                 current_capital += pnl
                 trades_count += 1
-                wins_count += 1
+                if reason == "Take-Profit":
+                    wins_count += 1
+                
                 trade_log.append({
                     "timestamp": str(current_candle.name), "side": side, "entry": avg_entry_price, 
-                    "exit": tp_price, "pnl": pnl, "balance": current_capital, "reason": "Take-Profit", "leverage": avg_leverage
+                    "exit": exit_price, "pnl": pnl, "balance": current_capital, "reason": reason, "leverage": avg_leverage
                 })
                 open_positions = []
 
@@ -124,8 +131,7 @@ def run_envelope_backtest(data, params):
                     amount = (current_capital * balance_fraction / len(envelopes)) * leverage / band_low
                     open_positions.append({'side': 'long', 'entry_price': band_low, 'amount': amount, 'leverage': leverage})
 
-            # BUGFIX: Short-Einstiege nur prüfen, wenn keine Long-Position eröffnet wurde.
-            # Dies verhindert das gleichzeitige Eröffnen von Long- und Short-Positionen.
+            # Short-Einstiege nur prüfen, wenn keine Long-Position eröffnet wurde.
             if not open_positions:
                 for j, e_pct in enumerate(envelopes):
                     band_high = current_candle[f'band_high_{j+1}']
