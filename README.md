@@ -35,7 +35,7 @@ Update vom GitHub ausf Ubuntuserver:
 
 >git pull
 
-Eventuell neue Requireries installieren:
+Eventuell neue Requireries nach Update installieren:
 
 >source code/.venv/bin/activate
 
