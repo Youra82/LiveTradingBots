@@ -29,6 +29,12 @@ Abfrage der letzten Trading-Entscheidungen:
 Crontab -e jobs ansehen:
 > grep CRON /var/log/syslog | tail -n 20
 
+Update vom GitHub ausf Ubuntuserver:
+
+>git reset --hard origin/main
+>git pull
+
+
 
 \
 ⭐ Bots and strategies
