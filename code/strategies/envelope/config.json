@@ -10,7 +10,7 @@
     "strategy": {
         "_comment": "Parameter für die Kernstrategie (von Optimizer ermittelt)",
 
-        "_comment_average_type": "Art des gleitenden Durchschnitts ('DCM', 'SMA', 'EMA')",
+        "_comment_average_type": "Art des gleitenden Durchschnitts ('DCM', 'SMA', 'WMA')",
         "average_type": "DCM",
 
         "_comment_average_period": 12,
