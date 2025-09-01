@@ -31,7 +31,7 @@ Crontab -e jobs ansehen:
 
 Update vom GitHub ausf Ubuntuserver:
 
->git reset --hard origin/main
+>git reset --hard origin/main (löscht aber auch Keys)
 
 >git pull
 
