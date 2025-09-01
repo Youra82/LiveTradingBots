@@ -13,7 +13,7 @@ import pandas as pd
 sys.path.append(os.path.join(os.path.dirname(__file__), '..'))
 from analysis.backtest import run_envelope_backtest
 from utilities.strategy_logic import calculate_envelope_indicators
-from analysis.global_optimizer_pymoo import load_data, format_time # Wiederverwenden der Funktionen
+from analysis.global_optimizer_pymoo import load_data, format_time
 
 optuna.logging.set_verbosity(optuna.logging.WARNING)
 
@@ -64,7 +64,7 @@ def main(n_jobs, n_trials):
     
     input_file = os.path.join(os.path.dirname(__file__), 'optimization_candidates.json')
     if not os.path.exists(input_file):
-        print(f"Fehler: '{input_file}' nicht gefunden. Bitte zuerst Stufe 1 ausführen.")
+        print(f"Fehler: '{input_file}' nicht gefunden.")
         return
 
     with open(input_file, 'r') as f: candidates = json.load(f)
@@ -151,45 +151,30 @@ def main(n_jobs, n_trials):
                 display_list = trade_log_list
             
             # <<< ANPASSUNG HIER START >>>
-            print("  " + "-"*92)
-            print("  {:^28} | {:<7} | {:<7} | {:>15} | {:>18}".format("Datum & Uhrzeit (UTC)", "Seite", "Hebel", "Gewinn je Trade", "Neuer Kontostand"))
-            print("  " + "-"*92)
+            print("  " + "-"*106)
+            print("  {:^28} | {:<7} | {:<7} | {:>10} | {:>15} | {:>18}".format(
+                "Datum & Uhrzeit (UTC)", "Seite", "Hebel", "Stop-Loss", "Gewinn je Trade", "Neuer Kontostand"))
+            print("  " + "-"*106)
 
             for trade in display_list:
                 if trade is None:
-                    print("  ...".center(94))
+                    print("  ...".center(108))
                     continue
                 side_str = trade['side'].capitalize().ljust(7)
-                leverage_str = f"{int(trade.get('leverage', 0))}x".ljust(7) # Holt den Hebel aus dem Log
+                leverage_str = f"{int(trade.get('leverage', 0))}x".ljust(7)
+                sl_price_str = f"{trade.get('stop_loss_price', 0):.4f}".rjust(10) # Holt den SL Preis
                 pnl_str = f"{trade['pnl']:+9.2f} USDT".rjust(15)
                 balance_str = f"{trade['balance']:.2f} USDT".rjust(18)
-                print(f"  {trade['timestamp']:<28} | {side_str} | {leverage_str} | {pnl_str} | {balance_str}")
-            print("  " + "-"*92)
+                print(f"  {trade['timestamp']:<28} | {side_str} | {leverage_str} | {sl_price_str} | {pnl_str} | {balance_str}")
+            print("  " + "-"*106)
             # <<< ANPASSUNG HIER ENDE >>>
 
         print("\n  >>> EINSTELLUNGEN FÜR DEINE 'config.json' <<<")
         config_output = {
-            "market": {
-                "symbol": best_overall_info['symbol'],
-                "timeframe": best_overall_info['timeframe']
-            },
-            "strategy": {
-                "average_type": final_params['average_type'],
-                "average_period": final_params['average_period'],
-                "envelopes_pct": final_params['envelopes_pct']
-            },
-            "risk": {
-                "margin_mode": "isolated",
-                "balance_fraction_pct": 2,
-                "stop_loss_pct": round(final_params['stop_loss_pct'], 2),
-                "base_leverage": final_params['base_leverage'],
-                "max_leverage": int(final_params['max_leverage']),
-                "target_atr_pct": round(final_params['target_atr_pct'], 2)
-            },
-            "behavior": {
-                "use_longs": True,
-                "use_shorts": True
-            }
+            "market": {"symbol": best_overall_info['symbol'], "timeframe": best_overall_info['timeframe']},
+            "strategy": {"average_type": final_params['average_type'], "average_period": final_params['average_period'], "envelopes_pct": final_params['envelopes_pct']},
+            "risk": {"margin_mode": "isolated", "balance_fraction_pct": 2, "stop_loss_pct": round(final_params['stop_loss_pct'], 2), "base_leverage": final_params['base_leverage'], "max_leverage": int(final_params['max_leverage']), "target_atr_pct": round(final_params['target_atr_pct'], 2)},
+            "behavior": {"use_longs": True, "use_shorts": True}
         }
         print(json.dumps(config_output, indent=4))
         print("\n" + "="*80)
