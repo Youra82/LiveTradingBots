@@ -70,7 +70,6 @@ def main(n_jobs, n_trials):
     with open(input_file, 'r') as f: candidates = json.load(f)
     print(f"Lade {len(candidates)} Kandidaten zur Verfeinerung...")
     
-    # NEU: Benchmark für Stufe 2
     if candidates:
         print("\nFühre kurzen Benchmark zur Zeitschätzung durch...")
         first_candidate = candidates[0]
@@ -79,7 +78,6 @@ def main(n_jobs, n_trials):
         BASE_PARAMS = first_candidate['params']
         START_CAPITAL = first_candidate['start_capital']
         
-        # Erstelle eine Dummy-Studie nur für den Benchmark
         dummy_study = optuna.create_study()
         start_b = time.time()
         objective(dummy_study.ask())
@@ -111,7 +109,6 @@ def main(n_jobs, n_trials):
             best_overall_trial = study.best_trial
             best_overall_info = candidate
 
-    # --- NEU: Stark erweiterte finale Ausgabe ---
     if best_overall_trial:
         print("\n\n" + "="*80)
         print("    +++ FINALES BESTES ERGEBNIS NACH GLOBALER & LOKALER OPTIMIERUNG +++")
@@ -124,10 +121,8 @@ def main(n_jobs, n_trials):
             env_step = final_params_dict.pop('env_step', 0)
             final_params_dict['envelopes_pct'] = [round(env_start + i * env_step, 2) for i in range(base_envelopes_count)]
 
-        # Kombiniere die besten gefundenen Parameter
         final_params = {**BASE_PARAMS, **final_params_dict, 'start_capital': START_CAPITAL, 'max_leverage': 50.0}
 
-        # Lade Daten neu und führe finalen Backtest für den Report durch
         final_data = load_data(best_overall_info['symbol'], best_overall_info['timeframe'], best_overall_info['start_date'], best_overall_info['end_date'])
         data_with_indicators = calculate_envelope_indicators(final_data.copy(), final_params)
         final_result = run_envelope_backtest(data_with_indicators.dropna(), final_params)
@@ -155,19 +150,22 @@ def main(n_jobs, n_trials):
             else:
                 display_list = trade_log_list
             
-            print("  " + "-"*80)
-            print("  {:^28} | {:<7} | {:>15} | {:>18}".format("Datum & Uhrzeit (UTC)", "Seite", "Gewinn je Trade", "Neuer Kontostand"))
-            print("  " + "-"*80)
+            # <<< ANPASSUNG HIER START >>>
+            print("  " + "-"*92)
+            print("  {:^28} | {:<7} | {:<7} | {:>15} | {:>18}".format("Datum & Uhrzeit (UTC)", "Seite", "Hebel", "Gewinn je Trade", "Neuer Kontostand"))
+            print("  " + "-"*92)
 
             for trade in display_list:
                 if trade is None:
-                    print("  ...".center(82))
+                    print("  ...".center(94))
                     continue
                 side_str = trade['side'].capitalize().ljust(7)
+                leverage_str = f"{int(trade.get('leverage', 0))}x".ljust(7) # Holt den Hebel aus dem Log
                 pnl_str = f"{trade['pnl']:+9.2f} USDT".rjust(15)
                 balance_str = f"{trade['balance']:.2f} USDT".rjust(18)
-                print(f"  {trade['timestamp']:<28} | {side_str} | {pnl_str} | {balance_str}")
-            print("  " + "-"*80)
+                print(f"  {trade['timestamp']:<28} | {side_str} | {leverage_str} | {pnl_str} | {balance_str}")
+            print("  " + "-"*92)
+            # <<< ANPASSUNG HIER ENDE >>>
 
         print("\n  >>> EINSTELLUNGEN FÜR DEINE 'config.json' <<<")
         config_output = {
@@ -182,15 +180,15 @@ def main(n_jobs, n_trials):
             },
             "risk": {
                 "margin_mode": "isolated",
-                "balance_fraction_pct": 2, # Standardwert, kann angepasst werden
+                "balance_fraction_pct": 2,
                 "stop_loss_pct": round(final_params['stop_loss_pct'], 2),
                 "base_leverage": final_params['base_leverage'],
                 "max_leverage": int(final_params['max_leverage']),
                 "target_atr_pct": round(final_params['target_atr_pct'], 2)
             },
             "behavior": {
-                "use_longs": True, # Standardwert, kann angepasst werden
-                "use_shorts": True # Standardwert, kann angepasst werden
+                "use_longs": True,
+                "use_shorts": True
             }
         }
         print(json.dumps(config_output, indent=4))
