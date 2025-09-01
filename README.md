@@ -35,6 +35,12 @@ Update vom GitHub ausf Ubuntuserver:
 
 >git pull
 
+Eventuell neue Requireries installieren:
+
+>source code/.venv/bin/activate
+
+>pip install -r requirements.txt
+
 
 
 \
