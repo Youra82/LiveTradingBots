@@ -33,7 +33,7 @@ Update vom GitHub ausf Ubuntuserver:
 
 >./update_bot.sh
 
-vorher einmalig aktivieren
+vorher Update einmalig aktivieren
 
 >chmod +x update_bot.sh
 
