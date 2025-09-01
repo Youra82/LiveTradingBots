@@ -31,7 +31,7 @@ Crontab -e jobs ansehen:
 
 Update vom GitHub ausf Ubuntuserver:
 
->git reset --hard origin/main (löscht aber auch Keys, nut sinnvoll wenn Dateien im Server gelöscht werden müssen. Sonst nur git pull)
+>git reset --hard origin/main (leert aber auch Keys, nut sinnvoll wenn Dateien im Server gelöscht werden müssen. Sonst nur git pull)
 
 >git pull
 
