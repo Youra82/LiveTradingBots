@@ -7,3 +7,4 @@ pymoo
 optuna
 pydantic
 seaborn
+tqdm
