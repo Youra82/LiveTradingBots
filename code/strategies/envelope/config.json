@@ -1,60 +1,25 @@
 {
     "market": {
-        "_comment_symbol": "Das Handelspaar im Bitget-Format (BASIS/QUOTE:QUOTE)",
         "symbol": "XRP/USDT:USDT",
-
-        "_comment_timeframe": "Das Zeitfenster der Kerzen (z.B. '1h', '4h', '1d')",
         "timeframe": "4h"
     },
-
     "strategy": {
-        "_comment": "Parameter für die Kernstrategie (von Optimizer ermittelt)",
-
-        "_comment_average_type": "Art des gleitenden Durchschnitts ('DCM', 'SMA', 'WMA')",
-        "average_type": "DCM",
-
-        "_comment_average_period": 12,
-
-        "_comment_envelopes_pct": "Prozentuale Abstände für die Grid-Linien vom Durchschnitt",
+        "average_type": "WMA",
+        "average_period": 5,
         "envelopes_pct": [
-            7.47,
-            13.88,
-            20.29
+            2.42
         ]
     },
-
     "risk": {
-        "_comment": "Parameter für das Risiko- und Hebel-Management",
-
-        "_comment_margin_mode": "Sicherheitsmodus: 'isolated' (Risiko pro Trade begrenzt) oder 'cross'",
         "margin_mode": "isolated",
-
-        "_comment_balance_fraction_pct": "Prozentsatz des Kapitals für eine neue Gesamtposition",
         "balance_fraction_pct": 2,
-
-        "_comment_stop_loss_pct": "Verlustbegrenzung in Prozent vom durchschnittlichen Einstiegspreis",
-        "stop_loss_pct": 4.6,
-
-        "_comment_base_leverage": "Der 'Wunsch-Hebel' bei normaler Volatilität",
-        "base_leverage": 10,
-
-        "_comment_max_leverage": "Die feste Obergrenze für den Hebel (Sicherheitsnetz)",
-        "max_leverage": 25,
-
-        "_comment_target_atr_pct": "Das Volatilitäts-Ziel in Prozent für den dynamischen Hebel",
-        "target_atr_pct": 3.53
+        "stop_loss_pct": 0.57,
+        "base_leverage": 7,
+        "max_leverage": 50,
+        "target_atr_pct": 2.23
     },
-
     "behavior": {
-        "_comment": "Allgemeine Verhaltensregeln für den Bot",
-
-        "_comment_trigger_price_delta_pct": "Puffer für Trigger-Orders (aktuell nicht aktiv genutzt)",
-        "trigger_price_delta_pct": 0.5,
-
-        "_comment_use_longs": "Erlaube dem Bot, Long-Positionen zu eröffnen (true/false)",
         "use_longs": true,
-
-        "_comment_use_shorts": "Erlaube dem Bot, auf fallende Kurse zu wetten (true/false)",
-        "use_shorts": false
+        "use_shorts": true
     }
 }
