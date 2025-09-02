@@ -1,12 +1,12 @@
 #!/bin/bash
 
-# --- VERBESSERUNG 1: Bricht das Skript bei Fehlern sofort ab ---
+# Bricht das Skript bei Fehlern sofort ab
 set -e
 
 SECRET_FILE="secret.json"
 BACKUP_FILE="secret.json.bak"
 
-echo "--- Sicheres Update wird ausgeführt (v2) ---"
+echo "--- Sicheres Update wird ausgeführt (v3 - vollautomatisch) ---"
 
 # Schritt 1: Backup der Keys erstellen
 echo "1. Erstelle ein Backup von '$SECRET_FILE' nach '$BACKUP_FILE'..."
@@ -16,10 +16,10 @@ cp "$SECRET_FILE" "$BACKUP_FILE"
 echo "2. Lege alle lokalen Änderungen mit 'git stash' sicher beiseite..."
 git stash push --include-untracked
 
-# Schritt 3: Neuesten Stand von GitHub holen (mit expliziter Merge-Strategie)
-echo "3. Hole die neuesten Updates von GitHub..."
-# --- VERBESSERUNG 2: Erzwingt eine Merge-Strategie, um "divergent branches" zu lösen ---
-git pull origin main --no-rebase
+# Schritt 3: Neuesten Stand von GitHub holen
+echo "3. Hole die neuesten Updates von GitHub (vollautomatisch)..."
+# --- NEU: Verhindert das Öffnen des Texteditors für die Merge-Bestätigung ---
+git pull origin main --no-rebase --no-edit
 
 # Schritt 4: Lokale Änderungen zurückholen
 echo "4. Hole die lokalen Änderungen (deine Keys) aus dem Zwischenspeicher zurück..."
@@ -29,4 +29,5 @@ git stash pop
 echo "5. Stelle den Inhalt von '$SECRET_FILE' aus dem Backup wieder her..."
 cp "$BACKUP_FILE" "$SECRET_FILE"
 
-echo "✅ Update erfolgreich abgeschlossen. Deine Keys sind sicher und der Code ist aktuell."
+echo "✅ Update erfolgreich und vollautomatisch abgeschlossen."
+
