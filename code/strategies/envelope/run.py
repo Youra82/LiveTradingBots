@@ -7,7 +7,6 @@ import logging
 import pandas as pd
 import traceback
 import sqlite3
-import math # Wichtig für die Rundung
 
 PROJECT_ROOT = os.path.join(os.path.dirname(__file__), '..', '..', '..')
 sys.path.append(os.path.join(PROJECT_ROOT, 'code'))
@@ -176,6 +175,10 @@ def main():
             margin_mode = params['risk']['margin_mode']
             logger.info(f"Berechneter Hebel: {leverage}x. Margin-Modus: {margin_mode}")
             
+            # KORREKTUR: Hebel und Margin-Modus vor dem Platzieren der Orders setzen
+            bitget.set_margin_mode(SYMBOL, margin_mode)
+            bitget.set_leverage(SYMBOL, leverage, margin_mode)
+            
             free_balance = bitget.fetch_balance()['USDT']['free']
             capital_to_use = free_balance * (params['risk']['balance_fraction_pct'] / 100.0)
             
@@ -194,31 +197,34 @@ def main():
             capital_per_side = capital_to_use / num_sides_active
             notional_amount_per_order = (capital_per_side / num_grids) * leverage
             
-            min_order_amount = 1.0 
+            # KORREKTUR: Mindestordergröße und Präzision dynamisch von der Börse laden
+            market_info = bitget.get_market_info(SYMBOL)
+            min_order_amount = market_info.get('min_amount', 1.0) # Fallback auf 1.0
+            coin_name = SYMBOL.split('/')[0]
 
             if params['behavior'].get('use_longs', True):
                 for i in range(num_grids):
                     entry_price = latest_complete_candle[f'band_low_{i + 1}']
                     amount_calculated = notional_amount_per_order / entry_price
-                    amount = math.floor(amount_calculated) 
+                    amount = float(bitget.amount_to_precision(SYMBOL, amount_calculated))
                     
                     if amount >= min_order_amount:
                         bitget.place_limit_order(SYMBOL, 'buy', amount, entry_price, leverage=leverage, margin_mode=margin_mode)
-                        logger.info(f"Platziere Long-Grid {i+1}: {amount} XRP @{entry_price:.4f}")
+                        logger.info(f"Platziere Long-Grid {i+1}: {amount} {coin_name} @{entry_price:.4f}")
                     else:
-                        logger.warning(f"Long-Order übersprungen: Berechnete Menge ({amount_calculated:.2f} XRP) ist unter der Mindestmenge von {min_order_amount} XRP.")
+                        logger.warning(f"Long-Order übersprungen: Berechnete Menge ({amount_calculated:.4f} {coin_name}) ist unter der Mindestmenge von {min_order_amount} {coin_name}.")
 
             if params['behavior'].get('use_shorts', True):
                 for i in range(num_grids):
                     entry_price = latest_complete_candle[f'band_high_{i + 1}']
                     amount_calculated = notional_amount_per_order / entry_price
-                    amount = math.floor(amount_calculated)
+                    amount = float(bitget.amount_to_precision(SYMBOL, amount_calculated))
 
                     if amount >= min_order_amount:
                         bitget.place_limit_order(SYMBOL, 'sell', amount, entry_price, leverage=leverage, margin_mode=margin_mode)
-                        logger.info(f"Platziere Short-Grid {i+1}: {amount} XRP @{entry_price:.4f}")
+                        logger.info(f"Platziere Short-Grid {i+1}: {amount} {coin_name} @{entry_price:.4f}")
                     else:
-                        logger.warning(f"Short-Order übersprungen: Berechnete Menge ({amount_calculated:.2f} XRP) ist unter der Mindestmenge von {min_order_amount} XRP.")
+                        logger.warning(f"Short-Order übersprungen: Berechnete Menge ({amount_calculated:.4f} {coin_name}) ist unter der Mindestmenge von {min_order_amount} {coin_name}.")
 
     except Exception as e:
         logger.error(f"Ein unerwarteter Fehler ist aufgetreten: {e}", exc_info=True)
