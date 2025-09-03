@@ -7,9 +7,6 @@ def calculate_envelope_indicators(data, params):
     """
     Berechnet den gleitenden Durchschnitt, die Envelopes und den ATR-Indikator
     und fügt sie als neue Spalten zu den Daten hinzu.
-    VERBESSERUNG: Verwendet einen sauberen "Best-Practice"-Ansatz, um Indikatoren
-    in einem separaten DataFrame zu erstellen und sie dann zu den Originaldaten
-    hinzuzufügen. Dies vermeidet `SettingWithCopyWarning`s und ist performanter.
     """
     avg_type = params.get('average_type', 'DCM')
     avg_period = int(params.get('average_period', 5))
@@ -37,12 +34,16 @@ def calculate_envelope_indicators(data, params):
     indicators['atr'] = atr
     indicators['atr_pct'] = atr_pct
     
-    # Symmetrische Berechnung der Envelopes
     for i, e_pct in enumerate(envelopes):
         e = e_pct / 100
         indicators[f'band_high_{i + 1}'] = average * (1 + e)
         indicators[f'band_low_{i + 1}'] = average * (1 - e)
+
+    # <<< VERBESSERUNG 1 (Strategie): Trend-Filter-Indikator berechnen >>>
+    trend_filter_params = params.get('trend_filter', {})
+    if trend_filter_params.get('enabled', False):
+        tf_period = trend_filter_params.get('period', 200)
+        indicators['trend_sma'] = ta.trend.sma_indicator(data['close'], window=tf_period)
     
     # 4. Den Original-DataFrame mit dem Indikatoren-DataFrame verbinden
     return data.join(indicators)
-
