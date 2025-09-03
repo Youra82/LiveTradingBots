@@ -58,6 +58,15 @@ class BitgetFutures():
             return self.session.fetch_open_orders(symbol)
         except Exception as e:
             raise Exception(f"Failed to fetch open orders: {e}")
+            
+    # <<< NEUE FUNKTION START >>>
+    def fetch_my_trades(self, symbol: str, limit: int = 20) -> List[Dict[str, Any]]:
+        """Holt die letzten geschlossenen Trades für ein Symbol."""
+        try:
+            return self.session.fetch_my_trades(symbol, limit=limit)
+        except Exception as e:
+            raise Exception(f"Failed to fetch my trades for {symbol}: {e}")
+    # <<< NEUE FUNKTION ENDE >>>
 
     def fetch_open_trigger_orders(self, symbol: str) -> List[Dict[str, Any]]:
         try:
@@ -161,15 +170,11 @@ class BitgetFutures():
     
     def place_limit_order(self, symbol: str, side: str, amount: float, price: float, leverage: int, margin_mode: str, reduce: bool = False) -> Dict[str, Any]:
         try:
-            # --- FINALE KORREKTUR START ---
-            # Wir übergeben Hebel und Margin-Modus jetzt direkt mit der Order.
-            # Dies ist die zuverlässigste Methode.
             params = {
                 'reduceOnly': reduce,
-                'marginMode': margin_mode, # 'isolated' oder 'cross'
+                'marginMode': margin_mode,
                 'leverage': leverage,
             }
-            # --- FINALE KORREKTUR ENDE ---
             amount_str = self.session.amount_to_precision(symbol, amount)
             price_str = self.session.price_to_precision(symbol, price)
             
@@ -189,3 +194,4 @@ class BitgetFutures():
             return self.session.create_order(symbol, 'market', side, float(amount_str), price=None, params=params)
         except Exception as err:
             raise err
+
