@@ -63,6 +63,7 @@ def run_envelope_backtest(data, params):
     
     for i in range(1, len(data)):
         current_candle = data.iloc[i]
+        previous_candle = data.iloc[i-1] # <<< NEU: Vorherige Kerze für TP-Logik holen
         
         if open_positions:
             avg_entry_price = np.mean([p['entry_price'] for p in open_positions])
@@ -70,13 +71,13 @@ def run_envelope_backtest(data, params):
             side = open_positions[0]['side']
             avg_leverage = np.mean([p['leverage'] for p in open_positions])
 
-            # <<< ANPASSUNG HIER START >>>
-            # SL und TP Preise für das Logging definieren
+            # <<< VERBESSERUNG 1 START >>>
             sl_price = avg_entry_price * (1 - stop_loss_pct) if side == 'long' else avg_entry_price * (1 + stop_loss_pct)
-            tp_price = current_candle['average']
+            # TP wird auf Basis des Durchschnitts der VORHERIGEN Kerze gesetzt
+            tp_price = previous_candle['average'] 
             exit_price = None
             reason = None
-            # <<< ANPASSUNG HIER ENDE >>>
+            # <<< VERBESSERUNG 1 ENDE >>>
 
             if (side == 'long' and current_candle['low'] <= sl_price) or (side == 'short' and current_candle['high'] >= sl_price):
                 exit_price = sl_price
@@ -97,13 +98,11 @@ def run_envelope_backtest(data, params):
                 trades_count += 1
                 if reason == "Take-Profit": wins_count += 1
                 
-                # <<< ANPASSUNG HIER START >>>
                 trade_log.append({
                     "timestamp": str(current_candle.name), "side": side, "entry": avg_entry_price, 
                     "exit": exit_price, "pnl": pnl, "balance": current_capital, "reason": reason, 
                     "leverage": avg_leverage, "stop_loss_price": sl_price, "take_profit_price": tp_price
                 })
-                # <<< ANPASSUNG HIER ENDE >>>
                 open_positions = []
 
             if not open_positions:
@@ -143,3 +142,4 @@ def run_envelope_backtest(data, params):
         "win_rate": win_rate, "params": params, "end_capital": current_capital,
         "max_drawdown_pct": max_drawdown_pct, "trade_log": trade_log
     }
+
