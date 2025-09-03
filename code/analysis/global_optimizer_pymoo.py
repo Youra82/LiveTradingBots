@@ -24,8 +24,6 @@ START_CAPITAL = 1000.0
 MAX_LOSS_PER_TRADE_PCT = 2.0
 MINIMUM_TRADES = 10
 AVERAGE_TYPE_GLOBAL = 'DCM'
-# <<< NEU: Globale Variable für Trendfilter-Modus >>>
-TREND_FILTER_MODE_GLOBAL = 'off' 
 
 class TqdmCallback(Callback):
     def __init__(self, pbar):
@@ -46,15 +44,7 @@ def format_time(seconds):
 
 class EnvelopeOptimizationProblem(Problem):
     def __init__(self, **kwargs):
-        # <<< NEU: Eine Variable mehr für den Trendfilter (0=aus, 1=an) >>>
-        n_vars = 8 if TREND_FILTER_MODE_GLOBAL == 'both' else 7
-        # <<< NEU: Untere/obere Grenzen anpassen >>>
-        xl = [5, 0.5, 1, 1.0, 2.0, 1.0, 1]
-        xu = [89, 5.0, 50, 5.0, 10.0, 10.0, 4]
-        if TREND_FILTER_MODE_GLOBAL == 'both':
-            xl.append(0) # 0 = Trendfilter aus
-            xu.append(1) # 1 = Trendfilter an
-        super().__init__(n_var=n_vars, n_obj=2, n_constr=0, xl=xl, xu=xu, **kwargs)
+        super().__init__(n_var=7, n_obj=2, n_constr=0, xl=[5, 0.5, 1, 1.0, 2.0, 1.0, 1], xu=[89, 5.0, 50, 5.0, 10.0, 10.0, 4], **kwargs)
 
     def _evaluate(self, x, out, *args, **kwargs):
         results = []
@@ -66,31 +56,20 @@ class EnvelopeOptimizationProblem(Problem):
             env_start = round(individual[4], 2)
             env_step = round(individual[5], 2)
             env_count = int(round(individual[6]))
-            
-            # <<< NEU: Trendfilter-Status aus Genom lesen >>>
-            trend_filter_enabled = False
-            if TREND_FILTER_MODE_GLOBAL == 'on':
-                trend_filter_enabled = True
-            elif TREND_FILTER_MODE_GLOBAL == 'both':
-                trend_filter_enabled = True if round(individual[7]) == 1 else False
-
             envelopes = [round(env_start + i * env_step, 2) for i in range(env_count)]
             if any(e >= 100.0 for e in envelopes):
                 results.append([-1003, 1003])
                 continue
-                
             params = {
                 'average_period': avg_period, 'stop_loss_pct': sl_pct,
                 'base_leverage': base_lev, 'max_leverage': 50.0,
                 'target_atr_pct': target_atr,
                 'envelopes_pct': envelopes,
                 'start_capital': START_CAPITAL,
-                'average_type': AVERAGE_TYPE_GLOBAL,
-                'trend_filter': {'enabled': trend_filter_enabled, 'period': 200}
+                'average_type': AVERAGE_TYPE_GLOBAL
             }
             data_with_indicators = calculate_envelope_indicators(HISTORICAL_DATA.copy(), params)
             result = run_envelope_backtest(data_with_indicators.dropna(), params)
-            
             pnl = result.get('total_pnl_pct', -1000)
             drawdown = result.get('max_drawdown_pct', 1.0) * 100
             if pnl > 50000: pnl = -1002
@@ -118,17 +97,6 @@ def main(n_procs, n_gen_default):
     print("  1: DCM\n  2: SMA\n  3: WMA\n  4: Alle drei nacheinander")
     avg_choice = input("Auswahl (1-4): ")
     
-    # <<< NEU: Abfrage für den Trendfilter >>>
-    print("Soll der Trendfilter (SMA 200) genutzt werden?")
-    print("  1: Immer deaktiviert (schnellste Option)")
-    print("  2: Immer aktiviert")
-    print("  3: Beides testen (Optimierer entscheidet, verdoppelt Suchraum)")
-    tf_choice = input("Auswahl (1-3): ")
-    global TREND_FILTER_MODE_GLOBAL
-    if tf_choice == '2': TREND_FILTER_MODE_GLOBAL = 'on'
-    elif tf_choice == '3': TREND_FILTER_MODE_GLOBAL = 'both'
-    else: TREND_FILTER_MODE_GLOBAL = 'off'
-
     avg_types_to_run = []
     if avg_choice == '1': avg_types_to_run = ['DCM']
     elif avg_choice == '2': avg_types_to_run = ['SMA']
@@ -157,8 +125,7 @@ def main(n_procs, n_gen_default):
             
             print("\nFühre kurzen Benchmark zur Zeitschätzung durch...")
             problem_for_benchmark = EnvelopeOptimizationProblem()
-            # Pass sample individual shape to the number of variables
-            sample_individual = np.random.rand(1, problem_for_benchmark.n_var) * (problem_for_benchmark.xu - problem_for_benchmark.xl) + problem_for_benchmark.xl
+            sample_individual = np.random.rand(1, 7) * (problem_for_benchmark.xu - problem_for_benchmark.xl) + problem_for_benchmark.xl
             start_b = time.time()
             problem_for_benchmark._evaluate(sample_individual, out={})
             end_b = time.time()
@@ -182,7 +149,13 @@ def main(n_procs, n_gen_default):
 
                     with tqdm(total=n_gen, desc="Generationen") as pbar:
                         callback = TqdmCallback(pbar)
-                        res = minimize(problem, algorithm, termination, seed=1, callback=callback, verbose=False, save_history=False)
+                        res = minimize(problem,
+                                       algorithm,
+                                       termination,
+                                       seed=1,
+                                       callback=callback,
+                                       verbose=False,
+                                       save_history=False)
 
                     valid_indices = [i for i, f in enumerate(res.F) if f[0] < 0]
                     if not valid_indices: continue
@@ -191,11 +164,6 @@ def main(n_procs, n_gen_default):
                     
                     for i in best_indices:
                         params = res.X[i]
-                        
-                        trend_filter_enabled_res = False
-                        if TREND_FILTER_MODE_GLOBAL == 'on': trend_filter_enabled_res = True
-                        elif TREND_FILTER_MODE_GLOBAL == 'both': trend_filter_enabled_res = True if round(params[7]) == 1 else False
-                        
                         param_dict = {
                             'symbol': symbol, 'timeframe': timeframe, 'start_date': start_date,
                             'end_date': end_date, 'start_capital': START_CAPITAL,
@@ -204,8 +172,7 @@ def main(n_procs, n_gen_default):
                                 'average_type': avg_type, 'average_period': int(round(params[0])),
                                 'stop_loss_pct': round(params[1], 2), 'base_leverage': int(round(params[2])),
                                 'target_atr_pct': round(params[3], 2),
-                                'envelopes_pct': [round(round(params[4], 2) + j * round(params[5], 2), 2) for j in range(int(round(params[6])))],
-                                'trend_filter': {'enabled': trend_filter_enabled_res, 'period': 200, 'timeframe':timeframe}
+                                'envelopes_pct': [round(round(params[4], 2) + j * round(params[5], 2), 2) for j in range(int(round(params[6])))]
                             }
                         }
                         all_champions.append(param_dict)
