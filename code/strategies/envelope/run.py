@@ -103,6 +103,7 @@ def main():
         positions = bitget.fetch_open_positions(SYMBOL)
         open_position = positions[0] if positions else None
 
+        # <<< VERBESSERUNG 2 START >>>
         if open_position is None and tracker_info_before['status'] == 'in_trade':
             side = tracker_info_before.get('last_side', 'Unbekannt')
             last_price = latest_complete_candle['close']
@@ -113,9 +114,21 @@ def main():
                (side == 'short' and last_price <= resume_price):
                 reason = "Take-Profit"
                 
-            message = f"✅ Position für *{SYMBOL}* ({side}) geschlossen.\n- Grund: {reason}"
+            pnl = "N/A"
+            try:
+                closed_trades = bitget.fetch_my_trades(SYMBOL, limit=5)
+                if closed_trades:
+                    last_trade = closed_trades[-1]
+                    if 'info' in last_trade and 'realizedPnl' in last_trade['info']:
+                        pnl_value = float(last_trade['info']['realizedPnl'])
+                        pnl = f"{pnl_value:+.2f} USDT"
+            except Exception as e:
+                logger.warning(f"Konnte PnL für den geschlossenen Trade nicht abrufen: {e}")
+
+            message = f"✅ Position für *{SYMBOL}* ({side}) geschlossen.\n- Grund: {reason}\n- Ergebnis: *{pnl}*"
             send_telegram_message(bot_token, chat_id, message)
             logger.info(message)
+        # <<< VERBESSERUNG 2 ENDE >>>
 
         if open_position is None and tracker_info_before['status'] != "ok_to_trade":
             last_price = latest_complete_candle['close']
@@ -205,32 +218,24 @@ def main():
                     entry_price = latest_complete_candle[f'band_low_{i + 1}']
                     amount_calculated = notional_amount_per_order / entry_price
                     
-                    # <<< KORREKTUR START >>>
-                    # ZUERST prüfen, ob die Menge groß genug ist
                     if amount_calculated >= min_order_amount:
-                        # DANN die Menge für die Börse formatieren
                         amount = float(bitget.amount_to_precision(SYMBOL, amount_calculated))
                         bitget.place_limit_order(SYMBOL, 'buy', amount, entry_price, leverage=leverage, margin_mode=margin_mode)
                         logger.info(f"Platziere Long-Grid {i+1}: {amount} {coin_name} @{entry_price:.4f}")
                     else:
                         logger.warning(f"Long-Order übersprungen: Berechnete Menge ({amount_calculated:.4f} {coin_name}) ist unter der Mindestmenge von {min_order_amount} {coin_name}.")
-                    # <<< KORREKTUR ENDE >>>
 
             if params['behavior'].get('use_shorts', True):
                 for i in range(num_grids):
                     entry_price = latest_complete_candle[f'band_high_{i + 1}']
                     amount_calculated = notional_amount_per_order / entry_price
 
-                    # <<< KORREKTUR START >>>
-                    # ZUERST prüfen, ob die Menge groß genug ist
                     if amount_calculated >= min_order_amount:
-                        # DANN die Menge für die Börse formatieren
                         amount = float(bitget.amount_to_precision(SYMBOL, amount_calculated))
                         bitget.place_limit_order(SYMBOL, 'sell', amount, entry_price, leverage=leverage, margin_mode=margin_mode)
                         logger.info(f"Platziere Short-Grid {i+1}: {amount} {coin_name} @{entry_price:.4f}")
                     else:
                         logger.warning(f"Short-Order übersprungen: Berechnete Menge ({amount_calculated:.4f} {coin_name}) ist unter der Mindestmenge von {min_order_amount} {coin_name}.")
-                    # <<< KORREKTUR ENDE >>>
 
     except Exception as e:
         logger.error(f"Ein unerwarteter Fehler ist aufgetreten: {e}", exc_info=True)
