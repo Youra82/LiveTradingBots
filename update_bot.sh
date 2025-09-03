@@ -18,7 +18,6 @@ git stash push --include-untracked
 
 # Schritt 3: Neuesten Stand von GitHub holen
 echo "3. Hole die neuesten Updates von GitHub (vollautomatisch)..."
-# --- NEU: Verhindert das Öffnen des Texteditors für die Merge-Bestätigung ---
 git pull origin main --no-rebase --no-edit
 
 # Schritt 4: Lokale Änderungen zurückholen
@@ -30,4 +29,3 @@ echo "5. Stelle den Inhalt von '$SECRET_FILE' aus dem Backup wieder her..."
 cp "$BACKUP_FILE" "$SECRET_FILE"
 
 echo "✅ Update erfolgreich und vollautomatisch abgeschlossen."
-
