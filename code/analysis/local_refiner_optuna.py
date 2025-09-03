@@ -9,7 +9,6 @@ import numpy as np
 import time
 import pandas as pd
 
-# --- Pfade und Module laden ---
 sys.path.append(os.path.join(os.path.dirname(__file__), '..'))
 from analysis.backtest import run_envelope_backtest
 from utilities.strategy_logic import calculate_envelope_indicators
@@ -17,7 +16,6 @@ from analysis.global_optimizer_pymoo import load_data, format_time
 
 optuna.logging.set_verbosity(optuna.logging.WARNING)
 
-# --- Globale Variablen ---
 HISTORICAL_DATA = None
 START_CAPITAL = 1000.0
 BASE_PARAMS = {}
@@ -150,7 +148,6 @@ def main(n_jobs, n_trials):
             else:
                 display_list = trade_log_list
             
-            # <<< ANPASSUNG HIER START >>>
             print("  " + "-"*106)
             print("  {:^28} | {:<7} | {:<7} | {:>10} | {:>15} | {:>18}".format(
                 "Datum & Uhrzeit (UTC)", "Seite", "Hebel", "Stop-Loss", "Gewinn je Trade", "Neuer Kontostand"))
@@ -162,12 +159,11 @@ def main(n_jobs, n_trials):
                     continue
                 side_str = trade['side'].capitalize().ljust(7)
                 leverage_str = f"{int(trade.get('leverage', 0))}x".ljust(7)
-                sl_price_str = f"{trade.get('stop_loss_price', 0):.4f}".rjust(10) # Holt den SL Preis
+                sl_price_str = f"{trade.get('stop_loss_price', 0):.4f}".rjust(10)
                 pnl_str = f"{trade['pnl']:+9.2f} USDT".rjust(15)
                 balance_str = f"{trade['balance']:.2f} USDT".rjust(18)
                 print(f"  {trade['timestamp']:<28} | {side_str} | {leverage_str} | {sl_price_str} | {pnl_str} | {balance_str}")
             print("  " + "-"*106)
-            # <<< ANPASSUNG HIER ENDE >>>
 
         print("\n  >>> EINSTELLUNGEN FÜR DEINE 'config.json' <<<")
         config_output = {
