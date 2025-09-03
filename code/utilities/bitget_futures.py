@@ -14,7 +14,6 @@ class BitgetFutures():
             self.session = ccxt.bitget()
         else:
             api_setup.setdefault("options", {"defaultType": "future"})
-            # KORREKTUR: Demo-Modus-Logik integriert
             if demo_mode:
                 api_setup["options"]["productType"] = "SUSDT-FUTURES"
             self.session = ccxt.bitget(api_setup)
@@ -86,7 +85,6 @@ class BitgetFutures():
         except Exception as e:
             raise Exception(f"Failed to fetch open positions: {e}")
 
-    # KORREKTUR: Implementierung der leeren Methoden
     def set_margin_mode(self, symbol: str, margin_mode: str = 'isolated') -> None:
         try:
             self.session.set_margin_mode(margin_mode, symbol, params={'productType': 'USDT-FUTURES', 'marginCoin': 'USDT'})
@@ -102,7 +100,7 @@ class BitgetFutures():
             if margin_mode == 'isolated':
                 self.session.set_leverage(leverage, symbol, params={'holdSide': 'long'})
                 self.session.set_leverage(leverage, symbol, params={'holdSide': 'short'})
-            else: # 'crossed'
+            else:
                  self.session.set_leverage(leverage, symbol)
             logger.info(f"Hebel für {symbol} auf {leverage}x gesetzt.")
         except Exception as e:
@@ -111,11 +109,9 @@ class BitgetFutures():
             else:
                 raise Exception(f"Fehler beim Setzen des Hebels: {e}")
 
-    # NEU: Helfer-Methode für Markt-Informationen
     def get_market_info(self, symbol: str) -> Dict[str, Any]:
-        """ Ruft relevante Markt-Informationen wie Min-Amount und Präzision ab. """
         if symbol not in self.markets:
-            self.markets = self.session.load_markets(True) # Neuladen erzwingen
+            self.markets = self.session.load_markets(True)
         
         market = self.markets.get(symbol)
         if not market:
@@ -165,12 +161,17 @@ class BitgetFutures():
     
     def place_limit_order(self, symbol: str, side: str, amount: float, price: float, leverage: int, margin_mode: str, reduce: bool = False) -> Dict[str, Any]:
         try:
-            params = { 'reduceOnly': reduce }
+            # --- FINALE KORREKTUR START ---
+            # Wir übergeben Hebel und Margin-Modus jetzt direkt mit der Order.
+            # Dies ist die zuverlässigste Methode.
+            params = {
+                'reduceOnly': reduce,
+                'marginMode': margin_mode, # 'isolated' oder 'cross'
+                'leverage': leverage,
+            }
+            # --- FINALE KORREKTUR ENDE ---
             amount_str = self.session.amount_to_precision(symbol, amount)
             price_str = self.session.price_to_precision(symbol, price)
-            
-            # Hinweis: Hebel und Margin-Modus müssen VORHER via set_leverage/set_margin_mode gesetzt werden.
-            # Sie werden hier nicht direkt in der Order mitgegeben.
             
             response = self.session.create_order(symbol, 'limit', side, float(amount_str), float(price_str), params=params)
             return response
