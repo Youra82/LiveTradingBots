@@ -7,16 +7,22 @@
         "average_type": "WMA",
         "average_period": 5,
         "envelopes_pct": [
-            2.42
-        ]
+            3.05
+        ],
+        "trend_filter": {
+            "enabled": true,
+            "period": 200,
+            "timeframe": "4h"
+        }
     },
     "risk": {
         "margin_mode": "isolated",
         "balance_fraction_pct": 2,
-        "stop_loss_pct": 0.57,
+        "stop_loss_pct": 0.55,
         "base_leverage": 7,
         "max_leverage": 50,
-        "target_atr_pct": 2.23
+        "target_atr_pct": 2.24,
+        "global_drawdown_limit_pct": 35.0
     },
     "behavior": {
         "use_longs": true,
