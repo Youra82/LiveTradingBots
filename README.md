@@ -152,6 +152,11 @@ Code-Snippet
 
 Entferne das #-Zeichen, um ihn wieder zu starten.
 
+(Optional) Ersten Lauf manuell starten
+Nachdem der Cronjob eingerichtet ist, würde der Bot innerhalb der nächsten 5 Minuten automatisch starten. Wenn du sofort sehen möchtest, ob alles funktioniert, kannst du den ersten Lauf direkt manuell anstoßen:
+
+>bash code/run_envelope.sh
+
 \
 ✅ Requirements
 -------------
