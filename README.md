@@ -147,7 +147,7 @@ Bash
 Setze ein #-Zeichen an den Anfang der Zeile des Bots, um sie zu deaktivieren.
 
 Code-Snippet
-# */5 * * * * flock -n ...
+
 Entferne das #-Zeichen, um ihn wieder zu starten.
 
 \
