@@ -115,6 +115,8 @@ Dieses Skript lädt die neueste Version des Codes von GitHub herunter, ohne dein
 
 Bash
 
+>chmod +x update_bot.sh (einmalig)
+
 >./update_bot.sh
 
 Strategien finden & testen
