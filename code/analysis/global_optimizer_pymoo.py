@@ -44,7 +44,12 @@ def format_time(seconds):
 
 class EnvelopeOptimizationProblem(Problem):
     def __init__(self, **kwargs):
-        super().__init__(n_var=7, n_obj=2, n_constr=0, xl=[5, 0.5, 1, 1.0, 2.0, 1.0, 1], xu=[89, 5.0, 50, 5.0, 10.0, 10.0, 4], **kwargs)
+        # --- GEÄNDERT ---
+        # n_var von 7 auf 8 erhöht, um balance_fraction_pct zu optimieren.
+        # xl und xu um den Bereich für balance_fraction_pct erweitert (hier 1% bis 10%).
+        super().__init__(n_var=8, n_obj=2, n_constr=0, 
+                         xl=[5, 0.5, 1, 1.0, 2.0, 1.0, 1, 1.0], 
+                         xu=[89, 5.0, 50, 5.0, 10.0, 10.0, 4, 10.0], **kwargs)
 
     def _evaluate(self, x, out, *args, **kwargs):
         results = []
@@ -56,17 +61,21 @@ class EnvelopeOptimizationProblem(Problem):
             env_start = round(individual[4], 2)
             env_step = round(individual[5], 2)
             env_count = int(round(individual[6]))
+            balance_fraction = round(individual[7], 2) # --- NEU --- Holt den neuen Wert.
+            
             envelopes = [round(env_start + i * env_step, 2) for i in range(env_count)]
             if any(e >= 100.0 for e in envelopes):
                 results.append([-1003, 1003])
                 continue
+
             params = {
                 'average_period': avg_period, 'stop_loss_pct': sl_pct,
                 'base_leverage': base_lev, 'max_leverage': 50.0,
                 'target_atr_pct': target_atr,
                 'envelopes_pct': envelopes,
                 'start_capital': START_CAPITAL,
-                'average_type': AVERAGE_TYPE_GLOBAL
+                'average_type': AVERAGE_TYPE_GLOBAL,
+                'balance_fraction_pct': balance_fraction # --- NEU --- Fügt den Wert zu den Parametern hinzu.
             }
             data_with_indicators = calculate_envelope_indicators(HISTORICAL_DATA.copy(), params)
             result = run_envelope_backtest(data_with_indicators.dropna(), params)
@@ -125,7 +134,7 @@ def main(n_procs, n_gen_default):
             
             print("\nFühre kurzen Benchmark zur Zeitschätzung durch...")
             problem_for_benchmark = EnvelopeOptimizationProblem()
-            sample_individual = np.random.rand(1, 7) * (problem_for_benchmark.xu - problem_for_benchmark.xl) + problem_for_benchmark.xl
+            sample_individual = np.random.rand(1, 8) * (problem_for_benchmark.xu - problem_for_benchmark.xl) + problem_for_benchmark.xl
             start_b = time.time()
             problem_for_benchmark._evaluate(sample_individual, out={})
             end_b = time.time()
@@ -172,7 +181,8 @@ def main(n_procs, n_gen_default):
                                 'average_type': avg_type, 'average_period': int(round(params[0])),
                                 'stop_loss_pct': round(params[1], 2), 'base_leverage': int(round(params[2])),
                                 'target_atr_pct': round(params[3], 2),
-                                'envelopes_pct': [round(round(params[4], 2) + j * round(params[5], 2), 2) for j in range(int(round(params[6])))]
+                                'envelopes_pct': [round(round(params[4], 2) + j * round(params[5], 2), 2) for j in range(int(round(params[6])))],
+                                'balance_fraction_pct': round(params[7], 2) # --- NEU --- Schreibt den Wert in die Kandidaten-Datei.
                             }
                         }
                         all_champions.append(param_dict)
