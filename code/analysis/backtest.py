@@ -46,7 +46,8 @@ def run_envelope_backtest(data, params):
     target_atr_pct = params.get('target_atr_pct', 1.5)
     max_leverage = params.get('max_leverage', 50.0)
     
-    # KORRIGIERTE ZEILE: Liest jetzt 'balance_fraction_pct' aus den Parametern.
+    # --- KORRIGIERTE STELLE ---
+    # Liest jetzt den korrekten Parameter 'balance_fraction_pct'.
     balance_fraction = params.get('balance_fraction_pct', 100) / 100
     stop_loss_pct = params.get('stop_loss_pct', 0.4) / 100
     envelopes = params.get('envelopes_pct', [])
