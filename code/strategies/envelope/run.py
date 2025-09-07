@@ -106,7 +106,6 @@ def main():
         positions = bitget.fetch_open_positions(SYMBOL)
         open_position = positions[0] if positions else None
 
-        # --- Positions-Management ---
         if open_position:
             side = open_position['side']
             
@@ -131,7 +130,6 @@ def main():
             bitget.place_trigger_market_order(SYMBOL, close_side, amount, sl_price, reduce=True)
             logger.info(f"TP-Order @{tp_price:.4f} und SL-Order @{sl_price:.4f} platziert/aktualisiert.")
 
-        # --- Logik nach Positions-Schließung ---
         elif current_status == 'in_trade':
             side = last_side
             last_price = latest_complete_candle['close']
@@ -142,26 +140,29 @@ def main():
                (side == 'short' and last_price <= resume_price):
                 reason = "Take-Profit"
             
-            # <<< ÄNDERUNG: DETAILLIERTERE TELEGRAM-NACHRICHT >>>
-            next_step_info = (
-                f"ℹ️ **Nächster Schritt:**\n"
-                f"Der Bot geht nun in eine Sicherheits-Pause (Cooldown). "
-                f"Er wird erst wieder aktiv nach neuen Trades suchen, wenn sich der Preis "
-                f"dem Mittelwert von ca. *${resume_price:.4f}* angenähert hat."
-            )
+            # <<< ÄNDERUNG: Cooldown-Option aus config.json lesen >>>
+            use_cooldown = params.get('behavior', {}).get('use_cooldown_after_sl', True)
+            
+            if reason == "Stop-Loss / Manuell" and use_cooldown:
+                next_step_info = (
+                    f"ℹ️ **Nächster Schritt:**\n"
+                    f"Der Bot geht nun in eine Sicherheits-Pause (Cooldown). "
+                    f"Er wird erst wieder aktiv, wenn sich der Preis dem Mittelwert "
+                    f"von ca. *${resume_price:.4f}* angenähert hat."
+                )
+                new_status = "waiting_for_reentry"
+                logger.info("Position durch SL geschlossen. Wechsle in den Cooldown-Status.")
+            else:
+                next_step_info = (
+                    f"ℹ️ **Nächster Schritt:**\n"
+                    f"Der Bot ist sofort wieder bereit für neue Trades (Cooldown ist deaktiviert)."
+                )
+                new_status = "ok_to_trade"
+                logger.info(f"Position durch {reason} geschlossen. Bot ist sofort wieder bereit.")
 
-            message = (
-                f"✅ Position für *{SYMBOL}* ({side}) geschlossen.\n\n"
-                f"- Grund: {reason}\n\n"
-                f"{next_step_info}"
-            )
-            
+            message = (f"✅ Position für *{SYMBOL}* ({side}) geschlossen.\n\n- Grund: {reason}\n\n{next_step_info}")
             send_telegram_message(bot_token, chat_id, message)
-            log_message = message.replace("\n\n", " | ").replace("\n", " ") # Für einzeiliges Logging
-            logger.info(log_message)
-            
-            logger.info("Position wurde geschlossen. Wechsle in den Cooldown-Status ('waiting_for_reentry').")
-            update_bot_status("waiting_for_reentry", side)
+            update_bot_status(new_status, side)
         
         elif current_status == 'waiting_for_reentry':
             last_price = latest_complete_candle['close']
@@ -176,7 +177,6 @@ def main():
                 logger.info(f"Status ist 'waiting_for_reentry'. Warte auf Rückkehr zum Mittelwert.")
                 return
 
-        # --- Logik für neue Einstiege ---
         if current_status == "ok_to_trade":
             logger.info("Keine Position offen, prüfe auf neue Einstiege.")
             
@@ -185,10 +185,7 @@ def main():
             max_leverage = params['risk']['max_leverage']
             current_atr_pct = latest_complete_candle['atr_pct']
             
-            leverage = base_leverage
-            if pd.notna(current_atr_pct) and current_atr_pct > 0:
-                leverage = base_leverage * (target_atr_pct / current_atr_pct)
-            
+            leverage = base_leverage * (target_atr_pct / current_atr_pct) if pd.notna(current_atr_pct) and current_atr_pct > 0 else base_leverage
             leverage = int(round(max(1.0, min(leverage, max_leverage))))
             
             margin_mode = params['risk']['margin_mode']
@@ -224,7 +221,7 @@ def main():
                         bitget.place_limit_order(SYMBOL, 'buy', amount, entry_price, leverage=leverage, margin_mode=margin_mode)
                         logger.info(f"Platziere Long-Grid {i+1}: {amount} {coin_name} @{entry_price:.4f}")
                     else:
-                        logger.warning(f"Long-Order übersprungen: Berechnete Menge ({amount_calculated:.4f} {coin_name}) ist unter der Mindestmenge von {min_order_amount} {coin_name}.")
+                        logger.warning(f"Long-Order übersprungen: Menge ({amount_calculated:.4f}) unter Minimum ({min_order_amount}).")
 
             if params['behavior'].get('use_shorts', True):
                 for i in range(num_grids):
@@ -236,14 +233,12 @@ def main():
                         bitget.place_limit_order(SYMBOL, 'sell', amount, entry_price, leverage=leverage, margin_mode=margin_mode)
                         logger.info(f"Platziere Short-Grid {i+1}: {amount} {coin_name} @{entry_price:.4f}")
                     else:
-                        logger.warning(f"Short-Order übersprungen: Berechnete Menge ({amount_calculated:.4f} {coin_name}) ist unter der Mindestmenge von {min_order_amount} {coin_name}.")
+                        logger.warning(f"Short-Order übersprungen: Menge ({amount_calculated:.4f}) unter Minimum ({min_order_amount}).")
 
     except Exception as e:
         logger.error(f"Ein unerwarteter Fehler ist aufgetreten: {e}", exc_info=True)
         error_message = f"🚨 KRITISCHER FEHLER im Bot für *{SYMBOL}*!\n\n`{traceback.format_exc()}`"
-        if len(error_message) > 4000:
-            error_message = error_message[:4000] + "..."
-        send_telegram_message(bot_token, chat_id, error_message)
+        send_telegram_message(bot_token, chat_id, error_message[:4000])
 
 if __name__ == "__main__":
     main()
