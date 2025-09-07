@@ -42,29 +42,37 @@ def load_data(symbol, timeframe, start_date_str, end_date_str):
         print(f"Fehler beim Daten-Download für {timeframe}: {e}"); return pd.DataFrame()
 
 def run_envelope_backtest(data, params):
-    base_leverage = params.get('base_leverage', 10.0)
-    target_atr_pct = params.get('target_atr_pct', 1.5)
-    max_leverage = params.get('max_leverage', 50.0)
+    # <<< ÄNDERUNG: Cooldown-Option aus Parametern lesen >>>
+    use_cooldown = params.get('behavior', {}).get('use_cooldown_after_sl', True)
     
-    # --- KORRIGIERTE STELLE ---
-    # Liest jetzt den korrekten Parameter 'balance_fraction_pct'.
     balance_fraction = params.get('balance_fraction_pct', 100) / 100
     stop_loss_pct = params.get('stop_loss_pct', 0.4) / 100
     envelopes = params.get('envelopes_pct', [])
     fee_pct = 0.05 / 100
-
     start_capital = params.get('start_capital', 1000)
+    
     current_capital = start_capital
     trades_count, wins_count = 0, 0
     trade_log = []
-    
     peak_capital = start_capital
     max_drawdown_pct = 0.0
-    
     open_positions = []
     
+    # <<< ÄNDERUNG: Status-Management für den Backtest >>>
+    bot_status = "ok_to_trade"
+    last_side_closed = None
+
     for i in range(1, len(data)):
         current_candle = data.iloc[i]
+        
+        # <<< ÄNDERUNG: Cooldown-Logik im Backtest >>>
+        if bot_status == "waiting_for_reentry":
+            resume_price = current_candle['average']
+            if (last_side_closed == 'long' and current_candle['high'] >= resume_price) or \
+               (last_side_closed == 'short' and current_candle['low'] <= resume_price):
+                bot_status = "ok_to_trade"
+            else:
+                continue # Überspringe diese Kerze, da wir im Cooldown sind
         
         if open_positions:
             avg_entry_price = np.mean([p['entry_price'] for p in open_positions])
@@ -102,6 +110,13 @@ def run_envelope_backtest(data, params):
                     "leverage": avg_leverage, "stop_loss_price": sl_price, "take_profit_price": tp_price
                 })
                 open_positions = []
+                
+                # <<< ÄNDERUNG: Status nach Trade-Schließung setzen >>>
+                if reason == "Stop-Loss" and use_cooldown:
+                    bot_status = "waiting_for_reentry"
+                    last_side_closed = side
+                else:
+                    bot_status = "ok_to_trade"
 
             if not open_positions:
                 if current_capital <= 0: current_capital = 0
@@ -111,14 +126,9 @@ def run_envelope_backtest(data, params):
                 if current_capital == 0: break
                 continue
 
-        if not open_positions:
-            current_atr_pct = current_candle['atr_pct']
-            leverage = base_leverage
-            if pd.notna(current_atr_pct) and current_atr_pct > 0:
-                leverage = base_leverage * (target_atr_pct / current_atr_pct)
+        if not open_positions and bot_status == "ok_to_trade":
+            leverage = params.get('base_leverage', 10) # Vereinfacht für Backtest
             
-            leverage = int(round(max(1.0, min(leverage, max_leverage))))
-
             for j, e_pct in enumerate(envelopes):
                 band_low = current_candle[f'band_low_{j+1}']
                 if current_candle['low'] <= band_low:
