@@ -99,12 +99,41 @@ def main():
         latest_complete_candle = data.iloc[-2]
         logger.info("Indikatoren berechnet.")
 
-        tracker_info_before = get_bot_status()
+        bot_state = get_bot_status()
+        current_status = bot_state['status']
+        last_side = bot_state['last_side']
+        
         positions = bitget.fetch_open_positions(SYMBOL)
         open_position = positions[0] if positions else None
 
-        if open_position is None and tracker_info_before['status'] == 'in_trade':
-            side = tracker_info_before.get('last_side', 'Unbekannt')
+        # --- Positions-Management ---
+        if open_position:
+            side = open_position['side']
+            
+            if current_status == 'ok_to_trade':
+                entry_price = float(open_position['entryPrice'])
+                contracts = float(open_position['contracts'])
+                leverage = float(open_position['leverage'])
+                message = f"🔥 Position für *{SYMBOL}* eröffnet!\n- Seite: {side.upper()}\n- Einstieg: ${entry_price:.4f}\n- Menge: {contracts} {SYMBOL.split('/')[0]}\n- Hebel: {int(leverage)}x"
+                send_telegram_message(bot_token, chat_id, message)
+                logger.info(message)
+                update_bot_status("in_trade", side)
+
+            logger.info(f"{side} Position ist offen. Verwalte Take-Profit und Stop-Loss.")
+            close_side = 'sell' if side == 'long' else 'buy'
+            amount = float(open_position['contracts'])
+            avg_entry = float(open_position['entryPrice'])
+            
+            sl_price = avg_entry * (1 - params['risk']['stop_loss_pct']/100) if side == 'long' else avg_entry * (1 + params['risk']['stop_loss_pct']/100)
+            tp_price = latest_complete_candle['average']
+
+            bitget.place_trigger_market_order(SYMBOL, close_side, amount, tp_price, reduce=True)
+            bitget.place_trigger_market_order(SYMBOL, close_side, amount, sl_price, reduce=True)
+            logger.info(f"TP-Order @{tp_price:.4f} und SL-Order @{sl_price:.4f} platziert/aktualisiert.")
+
+        # --- Logik nach Positions-Schließung ---
+        elif current_status == 'in_trade':
+            side = last_side
             last_price = latest_complete_candle['close']
             resume_price = latest_complete_candle['average']
             
@@ -112,53 +141,43 @@ def main():
             if (side == 'long' and last_price >= resume_price) or \
                (side == 'short' and last_price <= resume_price):
                 reason = "Take-Profit"
-                
-            message = f"✅ Position für *{SYMBOL}* ({side}) geschlossen.\n- Grund: {reason}"
-            send_telegram_message(bot_token, chat_id, message)
-            logger.info(message)
+            
+            # <<< ÄNDERUNG: DETAILLIERTERE TELEGRAM-NACHRICHT >>>
+            next_step_info = (
+                f"ℹ️ **Nächster Schritt:**\n"
+                f"Der Bot geht nun in eine Sicherheits-Pause (Cooldown). "
+                f"Er wird erst wieder aktiv nach neuen Trades suchen, wenn sich der Preis "
+                f"dem Mittelwert von ca. *${resume_price:.4f}* angenähert hat."
+            )
 
-        if open_position is None and tracker_info_before['status'] != "ok_to_trade":
+            message = (
+                f"✅ Position für *{SYMBOL}* ({side}) geschlossen.\n\n"
+                f"- Grund: {reason}\n\n"
+                f"{next_step_info}"
+            )
+            
+            send_telegram_message(bot_token, chat_id, message)
+            log_message = message.replace("\n\n", " | ").replace("\n", " ") # Für einzeiliges Logging
+            logger.info(log_message)
+            
+            logger.info("Position wurde geschlossen. Wechsle in den Cooldown-Status ('waiting_for_reentry').")
+            update_bot_status("waiting_for_reentry", side)
+        
+        elif current_status == 'waiting_for_reentry':
             last_price = latest_complete_candle['close']
             resume_price = latest_complete_candle['average']
-            if ('long' in str(tracker_info_before.get('last_side')) and last_price >= resume_price) or \
-               ('short' in str(tracker_info_before.get('last_side')) and last_price <= resume_price):
+            
+            if (last_side == 'long' and last_price >= resume_price) or \
+               (last_side == 'short' and last_price <= resume_price):
                 logger.info("Preis ist zum Mittelwert zurückgekehrt. Status wird auf 'ok_to_trade' zurückgesetzt.")
-                update_bot_status("ok_to_trade", tracker_info_before.get('last_side'))
+                update_bot_status("ok_to_trade", last_side)
+                current_status = "ok_to_trade" 
             else:
-                logger.info(f"Status ist '{tracker_info_before['status']}'. Warte auf Rückkehr zum Mittelwert.")
+                logger.info(f"Status ist 'waiting_for_reentry'. Warte auf Rückkehr zum Mittelwert.")
                 return
 
-        tracker_info = get_bot_status()
-
-        if open_position:
-            side = open_position['side']
-            
-            if tracker_info['status'] == 'ok_to_trade':
-                entry_price = float(open_position['entryPrice'])
-                contracts = float(open_position['contracts'])
-                leverage = float(open_position['leverage'])
-                message = f"🔥 Position für *{SYMBOL}* eröffnet!\n- Seite: {side.upper()}\n- Einstieg: ${entry_price:.4f}\n- Menge: {contracts} {SYMBOL.split('/')[0]}\n- Hebel: {int(leverage)}x"
-                send_telegram_message(bot_token, chat_id, message)
-                logger.info(message)
-            
-            logger.info(f"{side} Position ist offen. Verwalte Take-Profit und Stop-Loss.")
-            close_side = 'sell' if side == 'long' else 'buy'
-            amount = float(open_position['contracts'])
-            avg_entry = float(open_position['entryPrice'])
-            
-            trigger_orders = bitget.fetch_open_trigger_orders(SYMBOL)
-            for order in trigger_orders:
-                bitget.cancel_trigger_order(order['id'], SYMBOL)
-            
-            sl_price = avg_entry * (1 - params['risk']['stop_loss_pct']/100) if side == 'long' else avg_entry * (1 + params['risk']['stop_loss_pct']/100)
-            tp_price = latest_complete_candle['average']
-
-            bitget.place_trigger_market_order(SYMBOL, close_side, amount, tp_price, reduce=True)
-            bitget.place_trigger_market_order(SYMBOL, close_side, amount, sl_price, reduce=True)
-            update_bot_status("in_trade", side)
-            logger.info(f"TP-Order @{tp_price:.4f} und SL-Order @{sl_price:.4f} platziert/aktualisiert.")
-
-        elif tracker_info['status'] == "ok_to_trade":
+        # --- Logik für neue Einstiege ---
+        if current_status == "ok_to_trade":
             logger.info("Keine Position offen, prüfe auf neue Einstiege.")
             
             base_leverage = params['risk']['base_leverage']
@@ -175,9 +194,6 @@ def main():
             margin_mode = params['risk']['margin_mode']
             logger.info(f"Berechneter Hebel: {leverage}x. Margin-Modus: {margin_mode}")
             
-            bitget.set_margin_mode(SYMBOL, margin_mode)
-            bitget.set_leverage(SYMBOL, leverage, margin_mode)
-            
             free_balance = bitget.fetch_balance()['USDT']['free']
             capital_to_use = free_balance * (params['risk']['balance_fraction_pct'] / 100.0)
             
@@ -186,11 +202,9 @@ def main():
                 logger.warning("Keine 'envelopes_pct' in der Konfiguration gefunden.")
                 return
             
-            num_sides_active = (1 if params['behavior'].get('use_longs', False) else 0) + \
-                               (1 if params['behavior'].get('use_shorts', False) else 0)
-            
+            num_sides_active = (1 if params['behavior'].get('use_longs', False) else 0) + (1 if params['behavior'].get('use_shorts', False) else 0)
             if num_sides_active == 0:
-                logger.warning("Beide Richtungen (long/short) deaktiviert. Keine Orders platziert.")
+                logger.warning("Beide Richtungen (long/short) deaktiviert.")
                 return
 
             capital_per_side = capital_to_use / num_sides_active
