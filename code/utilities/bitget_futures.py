@@ -1,197 +1,97 @@
 # code/utilities/bitget_futures.py
 
 import ccxt
-import time
-import pandas as pd
 import logging
-from typing import Any, Optional, Dict, List
+import pandas as pd
 
-logger = logging.getLogger(__name__)
+logger = logging.getLogger('stbot')
 
-class BitgetFutures():
-    def __init__(self, api_setup: Optional[Dict[str, Any]] = None, demo_mode: bool = False) -> None:
-        if api_setup is None:
-            self.session = ccxt.bitget()
-        else:
-            api_setup.setdefault("options", {"defaultType": "future"})
-            if demo_mode:
-                api_setup["options"]["productType"] = "SUSDT-FUTURES"
-            self.session = ccxt.bitget(api_setup)
-            if demo_mode:
-                self.session.set_sandbox_mode(True)
-        self.markets = self.session.load_markets()
-    
-    def fetch_ticker(self, symbol: str) -> Dict[str, Any]:
-        try:
-            return self.session.fetch_ticker(symbol)
-        except Exception as e:
-            raise Exception(f"Failed to fetch ticker for {symbol}: {e}")
+class BitgetFutures:
+    def __init__(self, api_setup):
+        self.session = ccxt.bitget({
+            'apiKey': api_setup['apiKey'],
+            'secret': api_setup['secret'],
+            'password': api_setup['password'],
+            'options': {
+                'defaultType': 'swap',
+            },
+        })
+        self.session.load_markets()
 
-    def fetch_min_amount_tradable(self, symbol: str) -> float:
+    def fetch_balance(self):
         try:
-            return self.markets[symbol]['limits']['amount']['min']
+            return self.session.fetch_balance()
         except Exception as e:
-            raise Exception(f"Failed to fetch minimum amount tradable: {e}")    
-        
-    def amount_to_precision(self, symbol: str, amount: float) -> str:
-        try:
-            return self.session.amount_to_precision(symbol, amount)
-        except Exception as e:
-            raise Exception(f"Failed to convert amount {amount} {symbol} to precision", e)
+            logger.error(f"Fehler beim Abrufen des Guthabens: {e}")
+            raise
 
-    def price_to_precision(self, symbol: str, price: float) -> str:
+    def fetch_recent_ohlcv(self, symbol, timeframe, limit):
         try:
-            return self.session.price_to_precision(symbol, price)
+            ohlcv = self.session.fetch_ohlcv(symbol, timeframe, limit=limit)
+            df = pd.DataFrame(ohlcv, columns=['timestamp', 'open', 'high', 'low', 'close', 'volume'])
+            df['timestamp'] = pd.to_datetime(df['timestamp'], unit='ms')
+            return df
         except Exception as e:
-            raise Exception(f"Failed to convert price {price} to precision for {symbol}", e)
+            logger.error(f"Fehler beim Laden der Kerzendaten: {e}")
+            raise
 
-    def fetch_balance(self, params: Optional[Dict[str, Any]] = None) -> Dict[str, Any]:
-        if params is None:
-            params = {}
+    def fetch_open_positions(self, symbol: str):
         try:
-            return self.session.fetch_balance(params)
+            all_positions = self.session.fetch_positions([symbol])
+            symbol_positions = [
+                p for p in all_positions 
+                if p.get('contracts') is not None 
+                and float(p['contracts']) > 0
+            ]
+            return symbol_positions
         except Exception as e:
-            raise Exception(f"Failed to fetch balance: {e}")
-
-    def fetch_open_orders(self, symbol: str) -> List[Dict[str, Any]]:
-        try:
-            return self.session.fetch_open_orders(symbol)
-        except Exception as e:
-            raise Exception(f"Failed to fetch open orders: {e}")
-            
-    # <<< NEUE FUNKTION START >>>
-    def fetch_my_trades(self, symbol: str, limit: int = 20) -> List[Dict[str, Any]]:
-        """Holt die letzten geschlossenen Trades für ein Symbol."""
-        try:
-            return self.session.fetch_my_trades(symbol, limit=limit)
-        except Exception as e:
-            raise Exception(f"Failed to fetch my trades for {symbol}: {e}")
-    # <<< NEUE FUNKTION ENDE >>>
-
-    def fetch_open_trigger_orders(self, symbol: str) -> List[Dict[str, Any]]:
-        try:
-            return self.session.fetch_open_orders(symbol, params={'stop': True})
-        except Exception as e:
-            raise Exception(f"Failed to fetch open trigger orders: {e}")
-
-    def cancel_order(self, id: str, symbol: str) -> Dict[str, Any]:
-        try:
-            return self.session.cancel_order(id, symbol)
-        except Exception as e:
-            raise Exception(f"Failed to cancel the {symbol} order {id}", e)
-
-    def cancel_trigger_order(self, id: str, symbol: str) -> Dict[str, Any]:
-        try:
-            return self.session.cancel_order(id, symbol, params={'stop': True})
-        except Exception as e:
-            raise Exception(f"Failed to cancel the {symbol} trigger order {id}", e)
-
-    def fetch_open_positions(self, symbol: str) -> List[Dict[str, Any]]:
-        try:
-            positions = self.session.fetch_positions([symbol], params={'productType': 'USDT-FUTURES', 'marginCoin': 'USDT'})
-            real_positions = [p for p in positions if p.get('contracts') and float(p['contracts']) > 0]
-            return real_positions
-        except Exception as e:
+            logger.error(f"Fehler beim Abrufen der offenen Positionen: {e}")
             raise Exception(f"Failed to fetch open positions: {e}")
-
-    def set_margin_mode(self, symbol: str, margin_mode: str = 'isolated') -> None:
-        try:
-            self.session.set_margin_mode(margin_mode, symbol, params={'productType': 'USDT-FUTURES', 'marginCoin': 'USDT'})
-            logger.info(f"Margin-Modus für {symbol} auf '{margin_mode}' gesetzt.")
-        except Exception as e:
-            if 'repeat submit' in str(e):
-                logger.info(f"Margin-Modus für {symbol} ist bereits auf '{margin_mode}' gesetzt.")
-            else:
-                raise Exception(f"Fehler beim Setzen des Margin-Modus: {e}")
-
-    def set_leverage(self, symbol: str, leverage: int, margin_mode: str) -> None:
-        try:
-            if margin_mode == 'isolated':
-                self.session.set_leverage(leverage, symbol, params={'holdSide': 'long'})
-                self.session.set_leverage(leverage, symbol, params={'holdSide': 'short'})
-            else:
-                 self.session.set_leverage(leverage, symbol)
-            logger.info(f"Hebel für {symbol} auf {leverage}x gesetzt.")
-        except Exception as e:
-            if 'repeat submit' in str(e):
-                logger.info(f"Hebel für {symbol} ist bereits auf {leverage}x gesetzt.")
-            else:
-                raise Exception(f"Fehler beim Setzen des Hebels: {e}")
-
-    def get_market_info(self, symbol: str) -> Dict[str, Any]:
-        if symbol not in self.markets:
-            self.markets = self.session.load_markets(True)
-        
-        market = self.markets.get(symbol)
-        if not market:
-            raise Exception(f"Markt-Informationen für {symbol} konnten nicht geladen werden.")
-        
-        return {
-            'min_amount': market['limits']['amount']['min'],
-            'amount_precision': market['precision']['amount']
-        }
-
-    def fetch_recent_ohlcv(self, symbol: str, timeframe: str, limit: int = 1000) -> pd.DataFrame:
-        try:
-            timeframe_in_ms = self.session.parse_timeframe(timeframe) * 1000
-            since = self.session.milliseconds() - limit * timeframe_in_ms
-            all_ohlcv = self.session.fetch_ohlcv(symbol, timeframe, since=since, limit=limit)
-        except Exception as e:
-            raise Exception(f"Failed to fetch OHLCV data for {symbol} in timeframe {timeframe}: {e}")
-
-        df = pd.DataFrame(all_ohlcv, columns=['timestamp', 'open', 'high', 'low', 'close', 'volume'])
-        df['timestamp'] = pd.to_datetime(df['timestamp'], unit='ms', utc=True)
-        df.set_index('timestamp', inplace=True)
-        df.sort_index(inplace=True)
-        return df
-
-    def fetch_historical_ohlcv(self, symbol: str, timeframe: str, start_date_str: str, end_date_str: str) -> pd.DataFrame:
-        from datetime import datetime, timezone
-        start_ts = int(datetime.strptime(start_date_str, "%Y-%m-%d").replace(tzinfo=timezone.utc).timestamp() * 1000)
-        end_ts = int(datetime.strptime(end_date_str, "%Y-%m-%d").replace(tzinfo=timezone.utc).timestamp() * 1000)
-        all_ohlcv = []
-        while start_ts < end_ts:
-            try:
-                ohlcv = self.session.fetch_ohlcv(symbol, timeframe, since=start_ts, limit=1000)
-                if not ohlcv: break
-                all_ohlcv.extend(ohlcv)
-                last_timestamp = ohlcv[-1][0]
-                start_ts = last_timestamp + self.session.parse_timeframe(timeframe) * 1000
-            except Exception as e:
-                raise Exception(f"Failed to fetch historical OHLCV data for {symbol}: {e}")
-        
-        if not all_ohlcv: return pd.DataFrame()
-        df = pd.DataFrame(all_ohlcv, columns=['timestamp', 'open', 'high', 'low', 'close', 'volume'])
-        df['timestamp'] = pd.to_datetime(df['timestamp'], unit='ms', utc=True)
-        df.set_index('timestamp', inplace=True)
-        df = df[~df.index.duplicated(keep='first')]
-        df.sort_index(inplace=True)
-        return df
     
-    def place_limit_order(self, symbol: str, side: str, amount: float, price: float, leverage: int, margin_mode: str, reduce: bool = False) -> Dict[str, Any]:
+    def fetch_open_orders(self, symbol: str, params={}):
+        """Ruft alle offenen (inklusive Trigger-) Orders für ein Symbol ab."""
         try:
-            params = {
-                'reduceOnly': reduce,
-                'marginMode': margin_mode,
-                'leverage': leverage,
-            }
-            amount_str = self.session.amount_to_precision(symbol, amount)
-            price_str = self.session.price_to_precision(symbol, price)
-            
-            response = self.session.create_order(symbol, 'limit', side, float(amount_str), float(price_str), params=params)
-            return response
+            return self.session.fetch_open_orders(symbol, params=params)
         except Exception as e:
-            raise Exception(f"Failed to place limit order of {amount} {symbol} at price {price}: {e}")
+            logger.error(f"Fehler beim Abrufen offener Orders: {e}")
+            raise
 
-    def place_trigger_market_order(self, symbol: str, side: str, amount: float, trigger_price: float, reduce: bool = False) -> Optional[Dict[str, Any]]:
+    def cancel_order(self, order_id: str, symbol: str, params={}):
+        """Löscht eine einzelne Order anhand ihrer ID."""
         try:
-            amount_str = self.session.amount_to_precision(symbol, amount)
-            trigger_price_str = self.session.price_to_precision(symbol, trigger_price)
-            params = {
-                'reduceOnly': reduce,
-                'stopPrice': trigger_price_str,
-            }
-            return self.session.create_order(symbol, 'market', side, float(amount_str), price=None, params=params)
-        except Exception as err:
-            raise err
+            return self.session.cancel_order(order_id, symbol, params=params)
+        except Exception as e:
+            logger.error(f"Fehler beim Löschen der Order {order_id}: {e}")
+            raise
 
+    def create_market_order(self, symbol: str, side: str, amount: float, leverage: int, margin_mode: str, params={}):
+        """
+        Platziert eine Market-Order und sendet Hebel/Margin-Modus als Teil der Order.
+        """
+        try:
+            order_params = {}
+            if params:
+                order_params.update(params)
+
+            order_params['marginMode'] = margin_mode.lower()
+            if leverage > 0:
+                order_params['leverage'] = leverage
+
+            return self.session.create_order(symbol, 'market', side, amount, params=order_params)
+        except Exception as e:
+            logger.error(f"Fehler beim Erstellen der Market-Order: {e}")
+            raise
+
+    def place_stop_order(self, symbol: str, side: str, amount: float, stop_price: float):
+        """
+        Platziert eine Stop-Market-Order (für Stop-Loss).
+        """
+        try:
+            params = {
+                'stopPrice': self.session.price_to_precision(symbol, stop_price),
+                'reduceOnly': True,
+            }
+            return self.session.create_order(symbol, 'market', side, amount, params=params)
+        except Exception as e:
+            logger.error(f"Fehler beim Platzieren der Stop-Order: {e}")
+            raise
