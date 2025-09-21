@@ -159,6 +159,11 @@ Nachdem der Cronjob eingerichtet ist, würde der Bot innerhalb der nächsten 5 M
 
 >bash code/run_envelope.sh
 
+Speicherbedarf des Bots:
+
+>du -sh .
+
+
 \
 ✅ Requirements
 -------------
